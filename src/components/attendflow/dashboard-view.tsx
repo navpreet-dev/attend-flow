@@ -206,19 +206,19 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
   return (
     <div className="flex-1">
       {/* ------------------------------- Header ------------------------------- */}
-      <header className="sticky top-0 z-40 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white">
+      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
+        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 sm:py-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-md shadow-emerald-600/20">
             <GraduationCap className="h-5 w-5" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-bold leading-tight">
+            <p className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight">
               AttendFlow
-              <span className="ml-2 hidden text-xs font-medium text-muted-foreground sm:inline">
+              <span className="ml-2.5 hidden text-xs font-medium text-muted-foreground sm:inline">
                 {data.profile?.name} · {data.profile?.rollNo}
               </span>
             </p>
-            <p className="truncate text-xs text-muted-foreground">
+            <p className="truncate text-[11px] text-muted-foreground">
               {data.profile?.course} · {data.profile?.section}
             </p>
           </div>
@@ -297,18 +297,18 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
           <motion.div
             initial={{ opacity: 0, scale: 0.99 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl border border-amber-500/40 bg-gradient-to-r from-amber-500/10 to-rose-500/10 p-4 sm:p-5"
+            className="card-premium rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] to-rose-500/[0.08] p-4 sm:p-5"
             role="alert"
           >
-            <div className="flex items-start gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+            <div className="flex items-start gap-3.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
                 <AlertTriangle className="h-5 w-5" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="font-semibold text-amber-800 dark:text-amber-300">
+                <p className="font-display text-[15px] font-semibold tracking-tight text-amber-800 dark:text-amber-300">
                   Low attendance warning — {lowSubjects.length} subject{lowSubjects.length === 1 ? "" : "s"} below {threshold}%
                 </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {lowSubjects.slice(0, 6).map((s) => (
                     <Badge key={s.subjectCode} variant="outline" className="border-amber-500/30 bg-background/60">
                       {s.subjectName} · {s.percentage.toFixed(1)}% · attend next {mustAttend(s.attended, s.total, threshold)}
@@ -333,12 +333,12 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
         {/* ------------------------------ Stat cards ---------------------------- */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card>
+          <Card className="card-premium rounded-2xl border-border/60">
             <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5">
+              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
                 <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" /> Overall attendance
               </CardDescription>
-              <CardTitle className={`text-3xl ${overallColor}`}>
+              <CardTitle className={`font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums ${overallColor}`}>
                 {overall.total > 0 ? `${overall.percentage.toFixed(1)}%` : "—"}
               </CardTitle>
             </CardHeader>
@@ -357,12 +357,12 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-premium rounded-2xl border-border/60">
             <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5">
+              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
                 <CalendarCheck2 className="h-3.5 w-3.5" aria-hidden="true" /> Classes attended
               </CardDescription>
-              <CardTitle className="text-3xl">
+              <CardTitle className="font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
                 {overall.attended}
                 <span className="text-lg font-medium text-muted-foreground">/{overall.total}</span>
               </CardTitle>
@@ -374,12 +374,12 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-premium rounded-2xl border-border/60">
             <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5">
+              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
                 <ListChecks className="h-3.5 w-3.5" aria-hidden="true" /> Subjects on track
               </CardDescription>
-              <CardTitle className="text-3xl">
+              <CardTitle className="font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
                 {data.subjects.length - lowSubjects.length}
                 <span className="text-lg font-medium text-muted-foreground">/{data.subjects.length}</span>
               </CardTitle>
@@ -393,12 +393,12 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="card-premium rounded-2xl border-border/60">
             <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5">
+              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
                 <Clock3 className="h-3.5 w-3.5" aria-hidden="true" /> Last synced
               </CardDescription>
-              <CardTitle className="text-xl leading-snug">
+              <CardTitle className="font-display text-xl font-semibold leading-snug tracking-tight">
                 {data.lastSyncAt ? fmtDateTime(data.lastSyncAt) : "Never"}
               </CardTitle>
             </CardHeader>
@@ -424,17 +424,17 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
         {/* -------------------------------- Tabs -------------------------------- */}
         <Tabs defaultValue="overview" className="space-y-5">
-          <TabsList className="h-11 w-full justify-start overflow-x-auto rounded-xl bg-muted/60 p-1">
-            <TabsTrigger value="overview" className="gap-1.5 px-3 sm:px-4">
+          <TabsList className="scrollbar-slim h-11 w-full justify-start overflow-x-auto rounded-xl bg-muted/50 p-1">
+            <TabsTrigger value="overview" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
               <LayoutDashboard className="h-4 w-4" aria-hidden="true" /> Overview
             </TabsTrigger>
-            <TabsTrigger value="trends" className="gap-1.5 px-3 sm:px-4">
+            <TabsTrigger value="trends" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
               <TrendingUp className="h-4 w-4" aria-hidden="true" /> Trends
             </TabsTrigger>
-            <TabsTrigger value="history" className="gap-1.5 px-3 sm:px-4">
+            <TabsTrigger value="history" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
               <History className="h-4 w-4" aria-hidden="true" /> History
             </TabsTrigger>
-            <TabsTrigger value="settings" className="gap-1.5 px-3 sm:px-4">
+            <TabsTrigger value="settings" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
               <Settings2 className="h-4 w-4" aria-hidden="true" /> Settings
             </TabsTrigger>
           </TabsList>
@@ -442,7 +442,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
           {/* Overview */}
           <TabsContent value="overview" className="mt-0 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-lg font-semibold">Subject-wise attendance</h2>
+              <h2 className="font-display text-lg font-semibold tracking-tight">Subject-wise attendance</h2>
               <p className="text-xs text-muted-foreground">
                 Target: <span className="font-semibold text-foreground">{threshold}%</span> · tap any card for the full class log
               </p>

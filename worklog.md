@@ -21,3 +21,26 @@ Stage Summary:
 - Production website at `/` — students of any AGC department/section enter their ERP roll no + password and get their real attendance fetched from agclms.in automatically; no manual entry, no demo data.
 - Key decisions: only real portal data (removed the Android app's fabricated fallbacks), credentials encrypted AES-256-GCM and stored only on opt-in, 45s per-roll sync rate limit + 6/15min login lockout to protect the college portal, cached-data-with-error-note degradation, offline localStorage snapshot.
 - Artifacts: prisma/schema.prisma, src/lib/{crypto,portal,sync-service,session,types,af-client}.ts, src/app/api/{auth/login,auth/logout,me,sync,settings}/route.ts, src/components/attendflow/{app,login-view,dashboard-view,subject-card,trends-chart,theme-toggle}.tsx, updated layout.tsx + page.tsx.
+
+---
+Task ID: 2
+Agent: Z.ai Code (main)
+Task: Round 2 — real Web Push notifications (work with site closed), auto permission prompt after login, premium design overhaul, About/Support mini-page, mobile polish. Explicit constraint: do NOT touch the working sync/scrape pipeline.
+
+Work Log:
+- Installed web-push (+types); generated VAPID keys into .env (NEXT_PUBLIC_VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT).
+- Prisma: added PushSubscription model (endpoint unique, p256dh, auth, userAgent), db:push OK.
+- PWA: public/sw.js (push + notificationclick handlers, vibrate, renotify), public/manifest.webmanifest, generated icon-192/512 + apple-touch-icon via sharp (emerald gradient cap).
+- src/lib/push-server.ts: sendPushToStudent — VAPID-signed sends to all devices, auto-prunes 404/410 endpoints.
+- API: POST /api/push/subscribe (session-gated upsert), POST /api/push/unsubscribe.
+- src/lib/push-client.ts: enablePushAlerts (permission → SW register → pushManager.subscribe → save to server), disablePushAlerts, registerServiceWorker.
+- AttendFlowApp: SW registered on mount; right after successful login the notification permission is requested automatically (with "Alerts on" toast); re-subscribes already-granted devices.
+- src/instrumentation.ts: background scheduler (boot +90s, then every 6h) — for each student with rememberMe+autoSync+stored password and stale (>6h) data it CALLS the existing syncStudent unchanged, then pushes a low-attendance Web Push if notifyLow is on. 3s gap between students; single-student failures isolated; dev double-start guarded via globalThis flag. Verified live in dev.log (query ran).
+- Premium design: fonts switched to Inter (body) + Sora (display, `font-display` utility), warm-paper light theme + charcoal-jade dark theme in refined oklch tokens, selection color, card-premium shadow utility, scrollbar-slim. Login page rebuilt: ambient jade glows, gradient headline, Sora headings, premium CTA (h-12, shadow, active scale). Dashboard: sticky header refined (gradient logo tile, Sora brand), stat cards with small-caps uppercase labels + Sora tabular-nums numbers, warning banner card-premium rounded-2xl, tabs restyled, subject cards rounded-2xl with rounded-full percentage badges + uppercase type labels.
+- AboutDialog rewritten as custom (non-Radix) animated sheet to fix a Radix SSR hydration mismatch (aria-controls id) — bottom-sheet on mobile, centered dialog on desktop; contains "Built by Navpreet Singh — Department of Computer Applications · BCA" (no section/semester), Support-the-project fund CTA + email navpreet70095@gmail.com, privacy note; footer shows "Made by Navpreet Singh" + About & Support button.
+- Browser-verified: 0 console/page errors on fresh loads; login invalid-credential flow vs live portal OK; About sheet OK; SW registration OK; /api/push/subscribe persists OK; web-push VAPID send path validated; mobile (390px) + desktop screenshots OK; sync files untouched (no push code in portal.ts/sync-service.ts).
+
+Stage Summary:
+- Notifications now work beyond the open tab: permission auto-asked at login, device subscribed via Web Push (PWA manifest + SW), and a server scheduler syncs opted-in students every 6h and pushes low-attendance alerts even when the site is closed (Android/Chrome: works with browser closed for installed PWA; iOS: install to home screen).
+- Design system upgraded to premium typography/palette; About/Support page delivered inside the single-route constraint.
+- Sync/scrape pipeline untouched as demanded.

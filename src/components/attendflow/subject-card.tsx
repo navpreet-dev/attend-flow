@@ -62,19 +62,19 @@ export function SubjectCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: Math.min(index * 0.04, 0.4) }}
     >
-      <Card className="h-full transition-shadow hover:shadow-md">
-        <CardContent className="p-4 sm:p-5 flex flex-col gap-3">
+      <Card className="card-premium h-full rounded-2xl border-border/60 transition-all hover:border-emerald-600/25 hover:shadow-lg hover:shadow-emerald-600/[0.06]">
+        <CardContent className="flex flex-col gap-3 p-4 sm:p-5">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="font-semibold leading-tight truncate" title={subject.subjectName}>
+              <p className="truncate font-semibold tracking-tight" title={subject.subjectName}>
                 {subject.subjectName}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
                 {subject.subjectType}
                 {subject.subjectCode.startsWith("AGC-") && subject.saId ? ` · SAId ${subject.saId}` : ""}
               </p>
             </div>
-            <Badge variant="outline" className={`shrink-0 border ${c.badge} font-semibold`}>
+            <Badge variant="outline" className={`shrink-0 rounded-full border font-display text-xs font-semibold ${c.badge}`}>
               {subject.percentage.toFixed(1)}%
             </Badge>
           </div>
@@ -112,12 +112,12 @@ export function SubjectCard({
 
           <Dialog>
             <DialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="mt-auto w-full justify-between text-muted-foreground hover:text-foreground">
+              <Button variant="ghost" size="sm" className="mt-auto w-full justify-between rounded-lg text-[13px] text-muted-foreground hover:text-foreground">
                 View class log ({subjectLogs.length})
                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </Button>
             </DialogTrigger>
-            <DialogContent className="sm:max-w-lg">
+            <DialogContent className="rounded-2xl sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>{subject.subjectName}</DialogTitle>
                 <DialogDescription>

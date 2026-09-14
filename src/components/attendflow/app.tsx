@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { GraduationCap, Loader2 } from "lucide-react";
+import { GraduationCap, Loader2, HeartHandshake } from "lucide-react";
+import { toast } from "sonner";
 import type { DashboardPayload } from "@/lib/types";
 import { apiLogin, apiMe, clearCachedPayload, readCachedPayload } from "@/lib/af-client";
+import { enablePushAlerts, registerServiceWorker } from "@/lib/push-client";
 import { LoginView } from "./login-view";
 import { DashboardView } from "./dashboard-view";
+import { AboutDialog } from "./about-dialog";
 
 type Status = "loading" | "anon" | "ready";
 
@@ -14,8 +17,9 @@ export function AttendFlowApp() {
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [offline, setOffline] = useState(false);
 
-  // Boot: check session (fall back to offline cache).
+  // Boot: check session (fall back to offline cache) + prep the service worker.
   useEffect(() => {
+    void registerServiceWorker();
     let cancelled = false;
     (async () => {
       try {
@@ -62,6 +66,26 @@ export function AttendFlowApp() {
     setData(payload);
     setOffline(false);
     setStatus("ready");
+
+    // Right after login: ask once for notification permission so low-attendance
+    // alerts can reach the student even when the site is closed (Web Push).
+    void (async () => {
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        const result = await enablePushAlerts();
+        if (result === "granted") {
+          toast.success("Alerts on — we'll notify you the moment any subject drops low.", {
+            icon: "🔔",
+          });
+        }
+      } else if (
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted" &&
+        payload.settings.notifyLow
+      ) {
+        // Permission already granted earlier — just make sure this device is subscribed.
+        void enablePushAlerts();
+      }
+    })();
   }, []);
 
   const handleData = useCallback((d: DashboardPayload) => {
@@ -100,23 +124,25 @@ export function AttendFlowApp() {
         />
       )}
 
-      <footer className="mt-auto border-t py-4">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-1 px-4 text-xs text-muted-foreground sm:flex-row">
+      <footer className="mt-auto border-t border-border/70 py-4">
+        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 text-xs text-muted-foreground sm:flex-row">
           <p>
-            <span className="font-semibold text-foreground">AttendFlow</span> — autonomous
-            attendance tracking for AGC ERP students
+            <span className="font-display font-semibold text-foreground">AttendFlow</span>
+            <span className="mx-1.5 text-border">·</span>
+            autonomous attendance tracking for AGC ERP students
           </p>
-          <p>
-            Data source:{" "}
-            <a
-              href="https://agclms.in/Elogin/StudentLogin"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline underline-offset-2 hover:text-foreground"
-            >
-              agclms.in/Elogin/StudentLogin
-            </a>
-          </p>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline">Made by Navpreet Singh</span>
+            <AboutDialog>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/70 px-3 py-1.5 font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <HeartHandshake className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-500" aria-hidden="true" />
+                About &amp; Support
+              </button>
+            </AboutDialog>
+          </div>
         </div>
       </footer>
     </div>

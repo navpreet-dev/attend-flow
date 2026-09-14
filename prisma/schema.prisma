@@ -32,6 +32,7 @@ model Student {
   subjects   SubjectAttendance[]
   logs       AttendanceLog[]
   syncEvents SyncEvent[]
+  pushSubs   PushSubscription[]
 }
 
 model Session {
@@ -79,6 +80,21 @@ model SyncEvent {
   studentId String
   status    String // SUCCESS | FAILED
   message   String?
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+// Web Push endpoints (one per device/browser) so low-attendance alerts
+// reach the student even when the site is closed.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  studentId String
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
   createdAt DateTime @default(now())
   student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
