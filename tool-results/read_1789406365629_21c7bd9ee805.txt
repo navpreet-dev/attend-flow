@@ -1,0 +1,686 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+     4→import { motion } from "framer-motion";
+     5→import { toast } from "sonner";
+     6→import { Button } from "@/components/ui/button";
+     7→import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+     8→import { Badge } from "@/components/ui/badge";
+     9→import { Progress } from "@/components/ui/progress";
+    10→import { Separator } from "@/components/ui/separator";
+    11→import { Slider } from "@/components/ui/slider";
+    12→import { Switch } from "@/components/ui/switch";
+    13→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    14→import {
+    15→  DropdownMenu,
+    16→  DropdownMenuContent,
+    17→  DropdownMenuItem,
+    18→  DropdownMenuLabel,
+    19→  DropdownMenuSeparator,
+    20→  DropdownMenuTrigger,
+    21→} from "@/components/ui/dropdown-menu";
+    22→import {
+    23→  Table,
+    24→  TableBody,
+    25→  TableCell,
+    26→  TableHead,
+    27→  TableHeader,
+    28→  TableRow,
+    29→} from "@/components/ui/table";
+    30→import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+    31→import {
+    32→  AlertTriangle,
+    33→  BellRing,
+    34→  CalendarCheck2,
+    35→  CheckCircle2,
+    36→  ClipboardCheck,
+    37→  Clock3,
+    38→  FileDown,
+    39→  FileJson,
+    40→  FileSpreadsheet,
+    41→  GraduationCap,
+    42→  History,
+    43→  LayoutDashboard,
+    44→  ListChecks,
+    45→  Loader2,
+    46→  LogOut,
+    47→  RefreshCw,
+    48→  Settings2,
+    49→  ShieldCheck,
+    50→  TrendingUp,
+    51→  WifiOff,
+    52→} from "lucide-react";
+    53→import type { DashboardPayload } from "@/lib/types";
+    54→import {
+    55→  canSkip,
+    56→  exportJson,
+    57→  exportLogsCsv,
+    58→  exportSubjectsCsv,
+    59→  fmtDateTime,
+    60→  mustAttend,
+    61→  overallStats,
+    62→  parsePortalDate,
+    63→} from "@/lib/af-client";
+    64→import { apiSettings, apiLogout, apiSync, cachePayload, SessionExpiredError } from "@/lib/af-client";
+    65→import { ThemeToggle } from "./theme-toggle";
+    66→import { SubjectCard } from "./subject-card";
+    67→import { TrendsCharts } from "./trends-chart";
+    68→
+    69→interface DashboardViewProps {
+    70→  data: DashboardPayload;
+    71→  offline: boolean;
+    72→  onData: (d: DashboardPayload) => void;
+    73→  onLogout: () => void;
+    74→}
+    75→
+    76→export function DashboardView({ data, offline, onData, onLogout }: DashboardViewProps) {
+    77→  const [syncing, setSyncing] = useState(false);
+    78→  const [savingSettings, setSavingSettings] = useState(false);
+    79→  const notifiedRef = useRef<string>("");
+    80→
+    81→  const threshold = data.settings.threshold;
+    82→  const overall = useMemo(() => overallStats(data.subjects), [data.subjects]);
+    83→  const lowSubjects = useMemo(
+    84→    () =>
+    85→      data.subjects
+    86→        .filter((s) => s.total > 0 && s.percentage < threshold)
+    87→        .sort((a, b) => a.percentage - b.percentage),
+    88→    [data.subjects, threshold]
+    89→  );
+    90→
+    91→  // Cache for offline access
+    92→  useEffect(() => {
+    93→    cachePayload(data);
+    94→  }, [data]);
+    95→
+    96→  // Auto background sync when stale + autoSync enabled
+    97→  const autoSyncedRef = useRef(false);
+    98→  useEffect(() => {
+    99→    if (offline) return;
+   100→    if (autoSyncedRef.current) return;
+   101→    if (data.settings.autoSync && data.stale && data.settings.rememberMe) {
+   102→      autoSyncedRef.current = true;
+   103→      void runSync(true);
+   104→    }
+   105→  }, [data.stale, data.settings.autoSync, data.settings.rememberMe, offline]);
+   106→
+   107→  // Low-attendance browser notifications (once per dataset)
+   108→  useEffect(() => {
+   109→    if (!data.settings.notifyLow || lowSubjects.length === 0) return;
+   110→    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+   111→    const key = `${data.lastSyncAt}-${lowSubjects.length}`;
+   112→    if (notifiedRef.current === key) return;
+   113→    notifiedRef.current = key;
+   114→    try {
+   115→      const worst = lowSubjects[0];
+   116→      new Notification("Low attendance warning", {
+   117→        body:
+   118→          lowSubjects.length === 1
+   119→            ? `${worst.subjectName} is at ${worst.percentage.toFixed(1)}% (below ${threshold}%).`
+   120→            : `${lowSubjects.length} subjects are below ${threshold}%. Lowest: ${worst.subjectName} at ${worst.percentage.toFixed(1)}%.`,
+   121→        tag: "attendflow-low-attendance",
+   122→      });
+   123→    } catch {
+   124→      /* notification failures are non-fatal */
+   125→    }
+   126→  }, [data.settings.notifyLow, data.lastSyncAt, lowSubjects, threshold]);
+   127→
+   128→  const runSync = useCallback(
+   129→    async (silent = false) => {
+   130→      if (syncing) return;
+   131→      setSyncing(true);
+   132→      try {
+   133→        const fresh = await apiSync();
+   134→        onData(fresh);
+   135→        if (fresh.error) {
+   136→          toast.warning(fresh.error);
+   137→        } else if (!silent) {
+   138→          toast.success("Attendance synced with the college portal.");
+   139→        }
+   140→      } catch (e) {
+   141→        if (e instanceof SessionExpiredError) {
+   142→          toast.error(e.message);
+   143→          setTimeout(() => onLogout(), 600);
+   144→          return;
+   145→        }
+   146→        const msg = e instanceof Error ? e.message : "Sync failed.";
+   147→        if (!silent) toast.error(msg);
+   148→        else if (msg.includes("log in")) toast.error(msg);
+   149→      } finally {
+   150→        setSyncing(false);
+   151→      }
+   152→    },
+   153→    [onData, onLogout, syncing]
+   154→  );
+   155→
+   156→  async function handleLogout() {
+   157→    try {
+   158→      await apiLogout();
+   159→    } finally {
+   160→      onLogout();
+   161→    }
+   162→  }
+   163→
+   164→  async function updateSettings(patch: Parameters<typeof apiSettings>[0]) {
+   165→    setSavingSettings(true);
+   166→    try {
+   167→      const s = await apiSettings(patch);
+   168→      onData({ ...data, settings: { ...data.settings, ...s } });
+   169→      toast.success("Settings saved.");
+   170→    } catch (e) {
+   171→      toast.error(e instanceof Error ? e.message : "Could not save settings.");
+   172→    } finally {
+   173→      setSavingSettings(false);
+   174→    }
+   175→  }
+   176→
+   177→  async function enableNotifications() {
+   178→    if (typeof Notification === "undefined") {
+   179→      toast.error("Notifications are not supported in this browser.");
+   180→      return;
+   181→    }
+   182→    const perm = await Notification.requestPermission();
+   183→    if (perm === "granted") {
+   184→      await updateSettings({ notifyLow: true });
+   185→      new Notification("AttendFlow alerts enabled", {
+   186→        body: "You'll get a notification whenever any subject drops below your target.",
+   187→      });
+   188→    } else {
+   189→      toast.error("Notification permission was denied.");
+   190→    }
+   191→  }
+   192→
+   193→  const overallLevel =
+   194→    overall.percentage >= threshold ? "ok" : overall.percentage >= threshold - 5 ? "warn" : "danger";
+   195→  const overallColor =
+   196→    overallLevel === "ok" ? "text-emerald-600 dark:text-emerald-500" : overallLevel === "warn" ? "text-amber-600 dark:text-amber-500" : "text-rose-600 dark:text-rose-500";
+   197→
+   198→  const overallNeed = mustAttend(overall.attended, overall.total, threshold);
+   199→  const overallSkip = canSkip(overall.attended, overall.total, threshold);
+   200→
+   201→  const sortedLogs = useMemo(
+   202→    () => [...data.logs].sort((a, b) => parsePortalDate(b.date) - parsePortalDate(a.date)),
+   203→    [data.logs]
+   204→  );
+   205→
+   206→  return (
+   207→    <div className="flex-1">
+   208→      {/* ------------------------------- Header ------------------------------- */}
+   209→      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
+   210→        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 sm:py-3">
+   211→          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-md shadow-emerald-600/20">
+   212→            <GraduationCap className="h-5 w-5" aria-hidden="true" />
+   213→          </div>
+   214→          <div className="min-w-0 flex-1">
+   215→            <p className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight">
+   216→              AttendFlow
+   217→              <span className="ml-2.5 hidden text-xs font-medium text-muted-foreground sm:inline">
+   218→                {data.profile?.name} · {data.profile?.rollNo}
+   219→              </span>
+   220→            </p>
+   221→            <p className="truncate text-[11px] text-muted-foreground">
+   222→              {data.profile?.course} · {data.profile?.section}
+   223→            </p>
+   224→          </div>
+   225→
+   226→          <div className="flex items-center gap-1.5 sm:gap-2">
+   227→            <Button
+   228→              variant="outline"
+   229→              size="sm"
+   230→              onClick={() => runSync()}
+   231→              disabled={syncing}
+   232→              className="gap-1.5"
+   233→              aria-label="Sync attendance now"
+   234→            >
+   235→              {syncing ? (
+   236→                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+   237→              ) : (
+   238→                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+   239→              )}
+   240→              <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
+   241→            </Button>
+   242→
+   243→            <DropdownMenu>
+   244→              <DropdownMenuTrigger asChild>
+   245→                <Button variant="outline" size="sm" className="gap-1.5" aria-label="Export data">
+   246→                  <FileDown className="h-4 w-4" aria-hidden="true" />
+   247→                  <span className="hidden sm:inline">Export</span>
+   248→                </Button>
+   249→              </DropdownMenuTrigger>
+   250→              <DropdownMenuContent align="end" className="w-52">
+   251→                <DropdownMenuLabel>Download reports</DropdownMenuLabel>
+   252→                <DropdownMenuSeparator />
+   253→                <DropdownMenuItem onClick={() => exportSubjectsCsv(data)}>
+   254→                  <FileSpreadsheet className="mr-2 h-4 w-4" aria-hidden="true" /> Subjects (CSV)
+   255→                </DropdownMenuItem>
+   256→                <DropdownMenuItem onClick={() => exportLogsCsv(data)}>
+   257→                  <ClipboardCheck className="mr-2 h-4 w-4" aria-hidden="true" /> Class log (CSV)
+   258→                </DropdownMenuItem>
+   259→                <DropdownMenuItem onClick={() => exportJson(data)}>
+   260→                  <FileJson className="mr-2 h-4 w-4" aria-hidden="true" /> Full backup (JSON)
+   261→                </DropdownMenuItem>
+   262→              </DropdownMenuContent>
+   263→            </DropdownMenu>
+   264→
+   265→            <ThemeToggle />
+   266→
+   267→            <Button
+   268→              variant="ghost"
+   269→              size="icon"
+   270→              onClick={handleLogout}
+   271→              aria-label="Log out"
+   272→              className="rounded-full text-muted-foreground hover:text-foreground"
+   273→            >
+   274→              <LogOut className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
+   275→            </Button>
+   276→          </div>
+   277→        </div>
+   278→      </header>
+   279→
+   280→      <main className="mx-auto max-w-6xl px-4 py-6 space-y-6">
+   281→        {/* Offline / error banners */}
+   282→        {offline && (
+   283→          <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+   284→            <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+   285→            You&apos;re offline — showing your last saved snapshot from this device.
+   286→          </div>
+   287→        )}
+   288→        {data.lastSyncOk === false && (
+   289→          <div className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-300">
+   290→            <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+   291→            The last sync attempt couldn&apos;t reach the portal. Press Sync to retry.
+   292→          </div>
+   293→        )}
+   294→
+   295→        {/* Low attendance warning */}
+   296→        {lowSubjects.length > 0 && (
+   297→          <motion.div
+   298→            initial={{ opacity: 0, scale: 0.99 }}
+   299→            animate={{ opacity: 1, scale: 1 }}
+   300→            className="card-premium rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] to-rose-500/[0.08] p-4 sm:p-5"
+   301→            role="alert"
+   302→          >
+   303→            <div className="flex items-start gap-3.5">
+   304→              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
+   305→                <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+   306→              </div>
+   307→              <div className="min-w-0 flex-1">
+   308→                <p className="font-display text-[15px] font-semibold tracking-tight text-amber-800 dark:text-amber-300">
+   309→                  Low attendance warning — {lowSubjects.length} subject{lowSubjects.length === 1 ? "" : "s"} below {threshold}%
+   310→                </p>
+   311→                <div className="mt-2.5 flex flex-wrap gap-1.5">
+   312→                  {lowSubjects.slice(0, 6).map((s) => (
+   313→                    <Badge key={s.subjectCode} variant="outline" className="border-amber-500/30 bg-background/60">
+   314→                      {s.subjectName} · {s.percentage.toFixed(1)}% · attend next {mustAttend(s.attended, s.total, threshold)}
+   315→                    </Badge>
+   316→                  ))}
+   317→                  {lowSubjects.length > 6 && (
+   318→                    <Badge variant="outline" className="border-amber-500/30 bg-background/60">
+   319→                      +{lowSubjects.length - 6} more
+   320→                    </Badge>
+   321→                  )}
+   322→                </div>
+   323→                {!data.settings.notifyLow && (
+   324→                  <Button size="sm" variant="outline" className="mt-3" onClick={enableNotifications}>
+   325→                    <BellRing className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+   326→                    Get notified when attendance drops
+   327→                  </Button>
+   328→                )}
+   329→              </div>
+   330→            </div>
+   331→          </motion.div>
+   332→        )}
+   333→
+   334→        {/* ------------------------------ Stat cards ---------------------------- */}
+   335→        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+   336→          <Card className="card-premium rounded-2xl border-border/60">
+   337→            <CardHeader className="pb-1">
+   338→              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
+   339→                <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" /> Overall attendance
+   340→              </CardDescription>
+   341→              <CardTitle className={`font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums ${overallColor}`}>
+   342→                {overall.total > 0 ? `${overall.percentage.toFixed(1)}%` : "—"}
+   343→              </CardTitle>
+   344→            </CardHeader>
+   345→            <CardContent className="pt-0">
+   346→              <Progress
+   347→                value={overall.percentage}
+   348→                aria-label={`Overall attendance ${overall.percentage.toFixed(1)} percent`}
+   349→                className="h-1.5"
+   350→                style={{ color: overallLevel === "ok" ? "#10b981" : overallLevel === "warn" ? "#f59e0b" : "#f43f5e" }}
+   351→              />
+   352→              <p className="mt-2 text-xs text-muted-foreground">
+   353→                {overallNeed > 0
+   354→                  ? `Attend next ${overallNeed} to reach ${threshold}%`
+   355→                  : `Can skip ${overallSkip} and stay ≥ ${threshold}%`}
+   356→              </p>
+   357→            </CardContent>
+   358→          </Card>
+   359→
+   360→          <Card className="card-premium rounded-2xl border-border/60">
+   361→            <CardHeader className="pb-1">
+   362→              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
+   363→                <CalendarCheck2 className="h-3.5 w-3.5" aria-hidden="true" /> Classes attended
+   364→              </CardDescription>
+   365→              <CardTitle className="font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
+   366→                {overall.attended}
+   367→                <span className="text-lg font-medium text-muted-foreground">/{overall.total}</span>
+   368→              </CardTitle>
+   369→            </CardHeader>
+   370→            <CardContent className="pt-0">
+   371→              <p className="text-xs text-muted-foreground">
+   372→                {overall.total - overall.attended} missed across {data.subjects.length} subjects
+   373→              </p>
+   374→            </CardContent>
+   375→          </Card>
+   376→
+   377→          <Card className="card-premium rounded-2xl border-border/60">
+   378→            <CardHeader className="pb-1">
+   379→              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
+   380→                <ListChecks className="h-3.5 w-3.5" aria-hidden="true" /> Subjects on track
+   381→              </CardDescription>
+   382→              <CardTitle className="font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
+   383→                {data.subjects.length - lowSubjects.length}
+   384→                <span className="text-lg font-medium text-muted-foreground">/{data.subjects.length}</span>
+   385→              </CardTitle>
+   386→            </CardHeader>
+   387→            <CardContent className="pt-0">
+   388→              <p className="text-xs text-muted-foreground">
+   389→                {lowSubjects.length === 0
+   390→                  ? "Everything above target — keep it up!"
+   391→                  : `${lowSubjects.length} need attention`}
+   392→              </p>
+   393→            </CardContent>
+   394→          </Card>
+   395→
+   396→          <Card className="card-premium rounded-2xl border-border/60">
+   397→            <CardHeader className="pb-1">
+   398→              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
+   399→                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" /> Last synced
+   400→              </CardDescription>
+   401→              <CardTitle className="font-display text-xl font-semibold leading-snug tracking-tight">
+   402→                {data.lastSyncAt ? fmtDateTime(data.lastSyncAt) : "Never"}
+   403→              </CardTitle>
+   404→            </CardHeader>
+   405→            <CardContent className="pt-0">
+   406→              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+   407→                {data.lastSyncOk === true ? (
+   408→                  <>
+   409→                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
+   410→                    Live from agclms.in
+   411→                  </>
+   412→                ) : data.lastSyncOk === false ? (
+   413→                  <>
+   414→                    <AlertTriangle className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
+   415→                    Last attempt failed — retry
+   416→                  </>
+   417→                ) : (
+   418→                  "Awaiting first sync"
+   419→                )}
+   420→              </p>
+   421→            </CardContent>
+   422→          </Card>
+   423→        </div>
+   424→
+   425→        {/* -------------------------------- Tabs -------------------------------- */}
+   426→        <Tabs defaultValue="overview" className="space-y-5">
+   427→          <TabsList className="scrollbar-slim h-11 w-full justify-start overflow-x-auto rounded-xl bg-muted/50 p-1">
+   428→            <TabsTrigger value="overview" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+   429→              <LayoutDashboard className="h-4 w-4" aria-hidden="true" /> Overview
+   430→            </TabsTrigger>
+   431→            <TabsTrigger value="trends" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+   432→              <TrendingUp className="h-4 w-4" aria-hidden="true" /> Trends
+   433→            </TabsTrigger>
+   434→            <TabsTrigger value="history" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+   435→              <History className="h-4 w-4" aria-hidden="true" /> History
+   436→            </TabsTrigger>
+   437→            <TabsTrigger value="settings" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+   438→              <Settings2 className="h-4 w-4" aria-hidden="true" /> Settings
+   439→            </TabsTrigger>
+   440→          </TabsList>
+   441→
+   442→          {/* Overview */}
+   443→          <TabsContent value="overview" className="mt-0 space-y-4">
+   444→            <div className="flex flex-wrap items-center justify-between gap-2">
+   445→              <h2 className="font-display text-lg font-semibold tracking-tight">Subject-wise attendance</h2>
+   446→              <p className="text-xs text-muted-foreground">
+   447→                Target: <span className="font-semibold text-foreground">{threshold}%</span> · tap any card for the full class log
+   448→              </p>
+   449→            </div>
+   450→            {data.subjects.length === 0 ? (
+   451→              <Card>
+   452→                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+   453→                  No subjects found. Press <span className="font-semibold text-foreground">Sync</span> to re-fetch from the portal.
+   454→                </CardContent>
+   455→              </Card>
+   456→            ) : (
+   457→              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+   458→                {data.subjects.map((s, i) => (
+   459→                  <SubjectCard
+   460→                    key={s.subjectCode}
+   461→                    subject={s}
+   462→                    data={data}
+   463→                    threshold={threshold}
+   464→                    index={i}
+   465→                  />
+   466→                ))}
+   467→              </div>
+   468→            )}
+   469→          </TabsContent>
+   470→
+   471→          {/* Trends */}
+   472→          <TabsContent value="trends" className="mt-0">
+   473→            <TrendsCharts data={data} threshold={threshold} />
+   474→          </TabsContent>
+   475→
+   476→          {/* History */}
+   477→          <TabsContent value="history" className="mt-0 space-y-4">
+   478→            <Card>
+   479→              <CardHeader className="pb-2">
+   480→                <CardTitle className="text-base">Recent sync activity</CardTitle>
+   481→                <CardDescription>Every automatic and manual fetch from the college portal.</CardDescription>
+   482→              </CardHeader>
+   483→              <CardContent>
+   484→                <ScrollArea className="max-h-40">
+   485→                  <ul className="space-y-2 text-sm">
+   486→                    {data.recentSyncs.length === 0 && (
+   487→                      <li className="text-muted-foreground">No sync events yet.</li>
+   488→                    )}
+   489→                    {data.recentSyncs.map((e) => (
+   490→                      <li key={e.id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+   491→                        <span className="flex items-center gap-2 min-w-0">
+   492→                          {e.status === "SUCCESS" ? (
+   493→                            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+   494→                          ) : (
+   495→                            <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500" aria-hidden="true" />
+   496→                          )}
+   497→                          <span className="truncate text-muted-foreground">{e.message ?? e.status}</span>
+   498→                        </span>
+   499→                        <span className="shrink-0 text-xs text-muted-foreground">{fmtDateTime(e.createdAt)}</span>
+   500→                      </li>
+   501→                    ))}
+   502→                  </ul>
+   503→                  <ScrollBar orientation="horizontal" />
+   504→                </ScrollArea>
+   505→              </CardContent>
+   506→            </Card>
+   507→
+   508→            <Card>
+   509→              <CardHeader className="pb-2">
+   510→                <CardTitle className="text-base">Full class log</CardTitle>
+   511→                <CardDescription>
+   512→                  {sortedLogs.length} recorded lectures · newest first
+   513→                </CardDescription>
+   514→              </CardHeader>
+   515→              <CardContent>
+   516→                <ScrollArea className="max-h-96 rounded-md border">
+   517→                  <Table>
+   518→                    <TableHeader className="sticky top-0 bg-card">
+   519→                      <TableRow>
+   520→                        <TableHead className="w-28">Date</TableHead>
+   521→                        <TableHead>Subject</TableHead>
+   522→                        <TableHead className="w-24 text-right">Status</TableHead>
+   523→                      </TableRow>
+   524→                    </TableHeader>
+   525→                    <TableBody>
+   526→                      {sortedLogs.length === 0 && (
+   527→                        <TableRow>
+   528→                          <TableCell colSpan={3} className="py-8 text-center text-muted-foreground">
+   529→                            No class logs recorded on the portal yet.
+   530→                          </TableCell>
+   531→                        </TableRow>
+   532→                      )}
+   533→                      {sortedLogs.map((l, i) => (
+   534→                        <TableRow key={`${l.subjectCode}-${l.date}-${i}`}>
+   535→                          <TableCell className="whitespace-nowrap font-mono text-xs">{l.date}</TableCell>
+   536→                          <TableCell className="max-w-[220px] truncate" title={l.subjectName ?? l.subjectCode}>
+   537→                            {l.subjectName ?? l.subjectCode}
+   538→                          </TableCell>
+   539→                          <TableCell className="text-right">
+   540→                            <Badge
+   541→                              variant="outline"
+   542→                              className={
+   543→                                l.status === "PRESENT"
+   544→                                  ? "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+   545→                                  : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400"
+   546→                              }
+   547→                            >
+   548→                              {l.status}
+   549→                            </Badge>
+   550→                          </TableCell>
+   551→                        </TableRow>
+   552→                      ))}
+   553→                    </TableBody>
+   554→                  </Table>
+   555→                  <ScrollBar orientation="horizontal" />
+   556→                </ScrollArea>
+   557→              </CardContent>
+   558→            </Card>
+   559→          </TabsContent>
+   560→
+   561→          {/* Settings */}
+   562→          <TabsContent value="settings" className="mt-0 space-y-4">
+   563→            <div className="grid gap-4 lg:grid-cols-2">
+   564→              <Card>
+   565→                <CardHeader className="pb-2">
+   566→                  <CardTitle className="text-base">Attendance target</CardTitle>
+   567→                  <CardDescription>
+   568→                    Warnings, predictions and recovery plans all use this threshold.
+   569→                  </CardDescription>
+   570→                </CardHeader>
+   571→                <CardContent className="space-y-4">
+   572→                  <div className="flex items-center gap-4">
+   573→                    <Slider
+   574→                      value={[threshold]}
+   575→                      min={30}
+   576→                      max={100}
+   577→                      step={1}
+   578→                      onValueCommit={(v) => updateSettings({ threshold: v[0] })}
+   579→                      aria-label="Attendance target percentage"
+   580→                      className="flex-1"
+   581→                    />
+   582→                    <span className="w-14 text-right text-lg font-bold tabular-nums">{threshold}%</span>
+   583→                  </div>
+   584→                  <p className="text-xs text-muted-foreground">
+   585→                    Most colleges (incl. AGC) require <span className="font-semibold">75%</span> per subject to be exam-eligible.
+   586→                  </p>
+   587→                  <Separator />
+   588→                  <div className="flex items-center justify-between gap-4">
+   589→                    <div>
+   590→                      <p className="text-sm font-medium">Daily auto-sync</p>
+   591→                      <p className="text-xs text-muted-foreground">
+   592→                        Refresh automatically whenever you open AttendFlow with saved credentials.
+   593→                      </p>
+   594→                    </div>
+   595→                    <Switch
+   596→                      checked={data.settings.autoSync}
+   597→                      disabled={savingSettings || !data.settings.rememberMe}
+   598→                      onCheckedChange={(v) => updateSettings({ autoSync: v })}
+   599→                      aria-label="Toggle daily auto-sync"
+   600→                    />
+   601→                  </div>
+   602→                  <div className="flex items-center justify-between gap-4">
+   603→                    <div>
+   604→                      <p className="text-sm font-medium">Low-attendance notifications</p>
+   605→                      <p className="text-xs text-muted-foreground">
+   606→                        Browser push alert whenever any subject drops below target.
+   607→                      </p>
+   608→                    </div>
+   609→                    <div className="flex items-center gap-2">
+   610→                      {typeof Notification !== "undefined" && Notification.permission !== "granted" && (
+   611→                        <Button size="sm" variant="outline" onClick={enableNotifications}>
+   612→                          Enable
+   613→                        </Button>
+   614→                      )}
+   615→                      <Switch
+   616→                        checked={data.settings.notifyLow}
+   617→                        disabled={savingSettings}
+   618→                        onCheckedChange={(v) =>
+   619→                          typeof Notification !== "undefined" && Notification.permission !== "granted" && v
+   620→                            ? enableNotifications()
+   621→                            : updateSettings({ notifyLow: v })
+   622→                        }
+   623→                        aria-label="Toggle low-attendance notifications"
+   624→                      />
+   625→                    </div>
+   626→                  </div>
+   627→                </CardContent>
+   628→              </Card>
+   629→
+   630→              <Card>
+   631→                <CardHeader className="pb-2">
+   632→                  <CardTitle className="text-base">Account &amp; security</CardTitle>
+   633→                  <CardDescription>How AttendFlow protects your data.</CardDescription>
+   634→                </CardHeader>
+   635→                <CardContent className="space-y-3 text-sm">
+   636→                  <div className="flex items-start gap-2.5">
+   637→                    <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+   638→                    <p>
+   639→                      <span className="font-medium">Encrypted storage.</span>{" "}
+   640→                      {data.settings.rememberMe
+   641→                        ? "Your portal password is sealed with AES-256-GCM and used only to sync your attendance."
+   642→                        : "You did not tick \"Remember me\", so no password is stored — you'll re-enter it at next login."}
+   643→                    </p>
+   644→                  </div>
+   645→                  <div className="flex items-start gap-2.5">
+   646→                    <WifiOff className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+   647→                    <p>
+   648→                      <span className="font-medium">Offline cache.</span> Your latest snapshot is
+   649→                      saved on this device so the dashboard opens even without internet.
+   650→                    </p>
+   651→                  </div>
+   652→                  <div className="flex items-start gap-2.5">
+   653→                    <BellRing className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+   654→                    <p>
+   655→                      <span className="font-medium">Portal-friendly.</span> Syncs are rate-limited so the
+   656→                      college portal is never hammered, even with thousands of students.
+   657→                    </p>
+   658→                  </div>
+   659→                  <Separator />
+   660→                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+   661→                    <dt className="text-muted-foreground">Student</dt>
+   662→                    <dd className="font-medium">{data.profile?.name} ({data.profile?.rollNo})</dd>
+   663→                    <dt className="text-muted-foreground">Course</dt>
+   664→                    <dd className="font-medium">{data.profile?.course}</dd>
+   665→                    <dt className="text-muted-foreground">Section</dt>
+   666→                    <dd className="font-medium">{data.profile?.section}</dd>
+   667→                    <dt className="text-muted-foreground">Department</dt>
+   668→                    <dd className="font-medium">{data.profile?.department}</dd>
+   669→                    <dt className="text-muted-foreground">Class incharge</dt>
+   670→                    <dd className="font-medium">{data.profile?.incharge}</dd>
+   671→                  </dl>
+   672→                  <Separator />
+   673→                  <Button variant="destructive" size="sm" className="w-full" onClick={handleLogout}>
+   674→                    <LogOut className="mr-1.5 h-4 w-4" aria-hidden="true" />
+   675→                    Log out &amp; clear saved session
+   676→                  </Button>
+   677→                </CardContent>
+   678→              </Card>
+   679→            </div>
+   680→          </TabsContent>
+   681→        </Tabs>
+   682→      </main>
+   683→    </div>
+   684→  );
+   685→}
+   686→

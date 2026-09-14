@@ -44,3 +44,26 @@ Stage Summary:
 - Notifications now work beyond the open tab: permission auto-asked at login, device subscribed via Web Push (PWA manifest + SW), and a server scheduler syncs opted-in students every 6h and pushes low-attendance alerts even when the site is closed (Android/Chrome: works with browser closed for installed PWA; iOS: install to home screen).
 - Design system upgraded to premium typography/palette; About/Support page delivered inside the single-route constraint.
 - Sync/scrape pipeline untouched as demanded.
+
+---
+Task ID: 3
+Agent: Z.ai Code (main)
+Task: Fix mobile responsiveness only — text overflowing layout in warning section and merged/overflowing text in history section (user demand: touch NOTHING else, especially not the sync pipeline).
+
+Work Log:
+- Built a temporary visual fixture (scripts/fixture-visual.ts → Student FIXTURE-VISUAL-01 + long subject names, low-% subjects, 30 logs, 5 sync events with long messages, direct Session token) and inspected the real app at 390×844 with agent-browser.
+- Measured page scrollWidth = 580px on a 390px screen (190px horizontal overflow) and reproduced every reported defect.
+- Root causes found & fixed (CSS/layout only, zero logic touched):
+  1. Warning section badges: shadcn Badge base has whitespace-nowrap + w-fit → long "Subject · 45.0% · attend next 48" badges overflowed the card and stretched the page. Fix: max-w-full whitespace-normal break-words text-left leading-relaxed on those badges + max-w-full overflow-hidden on the warning banner.
+  2. Subject-card + stat grids had no explicit mobile column (`grid gap-4 sm:grid-cols-2…`) → implicit auto column sized to max-content → subject cards rendered 528px wide on mobile. Fix: added grid-cols-1 to both grids (dashboard-view.tsx).
+  3. History "Recent sync activity": truncate failed inside Radix ScrollArea — two stacked causes: (a) flex truncate chain lacked min-w sizing → fixed with flex min-w-0 flex-1 wrapper + w-0 min-w-0 flex-1 truncate on the message span (zero flex-basis kills the nowrap min-content contribution); (b) Radix's display:table inner wrapper expanded to max-content (646px) — pinned globally in globals.css with `[data-slot="scroll-area-viewport"] > div { width: 100% }`.
+  4. Radix ScrollArea max-h-* on the root is ignored by the viewport (percentage height vs auto-height root) → class-log table painted over the footer and list items over the next card (the literal "text merged" artifact). Fix: `[&>[data-slot=scroll-area-viewport]]:max-h-*` at all 3 ScrollArea usages (sync list max-h-40, class log max-h-96, subject dialog max-h-[50vh] in subject-card.tsx).
+  5. Class log table too wide for 390px (Status column pushed off-screen): Date w-[88px] sm:w-28, Status w-20 sm:w-24, subject cell max-w-[140px] sm:max-w-[220px] → all 3 columns fit at 390px.
+  6. Tab bar clipped "Settings" at 390px: triggers px-2.5 text-xs on mobile, sm:px-4 sm:text-[13px] restored on ≥sm.
+- Deleted fixture: cleanup script removed FIXTURE-VISUAL-01 (cascade), deleted fixture scripts.
+- bun run lint: clean. agent-browser full re-verification at 390px: pageW=390 everywhere (zero horizontal overflow), warning badges wrap inside card, sync list ellipsizes with timestamps visible, table shows Date/Subject/Status, dialog/settings/trends/login/About sheet all fit; desktop 1280 regression check OK; zero console/page errors; dev.log clean.
+- NOT touched: portal.ts, sync-service.ts, af-client.ts, session/crypto, API routes, notifications/push, scheduler, footer, theme system — sync pipeline 100% untouched as demanded.
+
+Stage Summary:
+- Mobile (390px) is now fully responsive: no text escapes any card, no merged/overlapping rows, no horizontal page scroll; desktop rendering unchanged.
+- Key artifacts: dashboard-view.tsx (badges, grids, tab triggers, sync list truncate chain, table column widths, 2 ScrollArea clamps), subject-card.tsx (1 ScrollArea clamp), globals.css (viewport inner-wrapper width:100% base rule).

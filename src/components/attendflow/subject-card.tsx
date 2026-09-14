@@ -126,7 +126,7 @@ export function SubjectCard({
                 </DialogDescription>
               </DialogHeader>
               <Separator />
-              <ScrollArea className="max-h-[50vh] pr-3">
+              <ScrollArea className="max-h-[50vh] pr-3 [&>[data-slot=scroll-area-viewport]]:max-h-[50vh]">
                 {subjectLogs.length === 0 ? (
                   <p className="py-6 text-center text-sm text-muted-foreground">
                     No dated class records found on the portal for this subject.

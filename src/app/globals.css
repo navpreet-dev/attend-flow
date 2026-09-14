@@ -128,6 +128,12 @@
   ::selection {
     background: color-mix(in oklch, var(--primary) 18%, transparent);
   }
+  /* Radix ScrollArea wraps content in a display:table div that expands to
+     max-content on narrow screens, breaking truncate/max-w inside. Pin it
+     to the viewport width so lists and tables shrink-fit correctly. */
+  [data-slot="scroll-area-viewport"] > div {
+    width: 100%;
+  }
 }
 
 @layer utilities {

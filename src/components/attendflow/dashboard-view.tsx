@@ -297,7 +297,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
           <motion.div
             initial={{ opacity: 0, scale: 0.99 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="card-premium rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] to-rose-500/[0.08] p-4 sm:p-5"
+            className="card-premium max-w-full overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] to-rose-500/[0.08] p-4 sm:p-5"
             role="alert"
           >
             <div className="flex items-start gap-3.5">
@@ -310,7 +310,11 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                 </p>
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {lowSubjects.slice(0, 6).map((s) => (
-                    <Badge key={s.subjectCode} variant="outline" className="border-amber-500/30 bg-background/60">
+                    <Badge
+                      key={s.subjectCode}
+                      variant="outline"
+                      className="max-w-full whitespace-normal break-words border-amber-500/30 bg-background/60 text-left leading-relaxed"
+                    >
                       {s.subjectName} · {s.percentage.toFixed(1)}% · attend next {mustAttend(s.attended, s.total, threshold)}
                     </Badge>
                   ))}
@@ -332,7 +336,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
         )}
 
         {/* ------------------------------ Stat cards ---------------------------- */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="card-premium rounded-2xl border-border/60">
             <CardHeader className="pb-1">
               <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
@@ -425,16 +429,16 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
         {/* -------------------------------- Tabs -------------------------------- */}
         <Tabs defaultValue="overview" className="space-y-5">
           <TabsList className="scrollbar-slim h-11 w-full justify-start overflow-x-auto rounded-xl bg-muted/50 p-1">
-            <TabsTrigger value="overview" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+            <TabsTrigger value="overview" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <LayoutDashboard className="h-4 w-4" aria-hidden="true" /> Overview
             </TabsTrigger>
-            <TabsTrigger value="trends" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+            <TabsTrigger value="trends" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <TrendingUp className="h-4 w-4" aria-hidden="true" /> Trends
             </TabsTrigger>
-            <TabsTrigger value="history" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+            <TabsTrigger value="history" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <History className="h-4 w-4" aria-hidden="true" /> History
             </TabsTrigger>
-            <TabsTrigger value="settings" className="gap-1.5 rounded-lg px-3 text-[13px] font-medium sm:px-4">
+            <TabsTrigger value="settings" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <Settings2 className="h-4 w-4" aria-hidden="true" /> Settings
             </TabsTrigger>
           </TabsList>
@@ -454,7 +458,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 {data.subjects.map((s, i) => (
                   <SubjectCard
                     key={s.subjectCode}
@@ -481,22 +485,22 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                 <CardDescription>Every automatic and manual fetch from the college portal.</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-40">
+                <ScrollArea className="max-h-40 [&>[data-slot=scroll-area-viewport]]:max-h-40">
                   <ul className="space-y-2 text-sm">
                     {data.recentSyncs.length === 0 && (
                       <li className="text-muted-foreground">No sync events yet.</li>
                     )}
                     {data.recentSyncs.map((e) => (
                       <li key={e.id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-                        <span className="flex items-center gap-2 min-w-0">
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
                           {e.status === "SUCCESS" ? (
                             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
                           ) : (
                             <AlertTriangle className="h-4 w-4 shrink-0 text-rose-500" aria-hidden="true" />
                           )}
-                          <span className="truncate text-muted-foreground">{e.message ?? e.status}</span>
+                          <span className="w-0 min-w-0 flex-1 truncate text-muted-foreground">{e.message ?? e.status}</span>
                         </span>
-                        <span className="shrink-0 text-xs text-muted-foreground">{fmtDateTime(e.createdAt)}</span>
+                        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{fmtDateTime(e.createdAt)}</span>
                       </li>
                     ))}
                   </ul>
@@ -513,13 +517,13 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-96 rounded-md border">
+                <ScrollArea className="max-h-96 rounded-md border [&>[data-slot=scroll-area-viewport]]:max-h-96">
                   <Table>
                     <TableHeader className="sticky top-0 bg-card">
                       <TableRow>
-                        <TableHead className="w-28">Date</TableHead>
+                        <TableHead className="w-[88px] sm:w-28">Date</TableHead>
                         <TableHead>Subject</TableHead>
-                        <TableHead className="w-24 text-right">Status</TableHead>
+                        <TableHead className="w-20 text-right sm:w-24">Status</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -533,7 +537,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                       {sortedLogs.map((l, i) => (
                         <TableRow key={`${l.subjectCode}-${l.date}-${i}`}>
                           <TableCell className="whitespace-nowrap font-mono text-xs">{l.date}</TableCell>
-                          <TableCell className="max-w-[220px] truncate" title={l.subjectName ?? l.subjectCode}>
+                          <TableCell className="max-w-[140px] truncate sm:max-w-[220px]" title={l.subjectName ?? l.subjectCode}>
                             {l.subjectName ?? l.subjectCode}
                           </TableCell>
                           <TableCell className="text-right">
