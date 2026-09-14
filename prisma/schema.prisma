@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// A student identified by the roll no they use on the AGC ERP portal.
+// Credentials are stored ONLY when the user opts into "remember me / auto-sync",
+// encrypted at rest with AES-256-GCM.
+model Student {
+  id           String    @id @default(cuid())
+  rollNo       String    @unique
+  passwordEnc  String?
+  rememberMe   Boolean   @default(false)
+  name         String?
+  course       String?
+  section      String?
+  department   String?
+  incharge     String?
+  threshold    Float     @default(75)
+  autoSync     Boolean   @default(true)
+  notifyLow    Boolean   @default(true)
+  lastSyncAt   DateTime?
+  lastSyncOk   Boolean?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions   Session[]
+  subjects   SubjectAttendance[]
+  logs       AttendanceLog[]
+  syncEvents SyncEvent[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  studentId String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+
+model SubjectAttendance {
+  id          String   @id @default(cuid())
+  studentId   String
+  subjectCode String
+  subjectName String
+  subjectType String   @default("Theory")
+  saId        String?
+  attended    Int      @default(0)
+  total       Int      @default(0)
+  percentage  Float    @default(0)
+  lastUpdated DateTime @default(now())
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, subjectCode])
+  @@index([studentId])
+}
+
+model AttendanceLog {
+  id          String   @id @default(cuid())
+  studentId   String
+  subjectCode String
+  date        String // dd-MM-yyyy as reported by the portal
+  status      String // PRESENT | ABSENT
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, subjectCode, date])
+  @@index([studentId, date])
+}
+
+model SyncEvent {
+  id        String   @id @default(cuid())
+  studentId String
+  status    String // SUCCESS | FAILED
+  message   String?
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
