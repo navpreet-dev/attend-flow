@@ -25,6 +25,11 @@ model Student {
   notifyLow    Boolean   @default(true)
   lastSyncAt   DateTime?
   lastSyncOk   Boolean?
+  // Authenticated AGC ERP portal cookies (AES-256-GCM sealed), captured after a
+  // successful sync so later syncs can skip the rate-limited login page entirely.
+  // Stored only under the same remember-me consent as the password.
+  portalCookiesEnc String?
+  portalCookiesAt  DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 

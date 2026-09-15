@@ -17,7 +17,7 @@ export async function register() {
   const INITIAL_DELAY_MS = 90_000;
   const INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
   const STALE_AFTER_MS = 6 * 60 * 60 * 1000;
-  const GAP_BETWEEN_STUDENTS_MS = 3_000;
+  const GAP_BETWEEN_STUDENTS_MS = 60_000; // generous gap — the portal firewall runs a volume limiter
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -25,6 +25,7 @@ export async function register() {
     try {
       const { db } = await import("@/lib/db");
       const { syncStudent } = await import("@/lib/sync-service");
+      const { isPortalCoolingDown } = await import("@/lib/portal");
       const { sendPushToStudent } = await import("@/lib/push-server");
 
       const students = await db.student.findMany({
@@ -35,8 +36,22 @@ export async function register() {
       for (const s of students) {
         // Only touch the portal when our snapshot is stale.
         if (s.lastSyncAt && Date.now() - s.lastSyncAt.getTime() < STALE_AFTER_MS) continue;
+        // Circuit breaker open? Skip this student entirely — waiting here and poking
+        // the portal would only keep the firewall's limiter alive. The next tick
+        // (or a later student slot) picks them up.
+        if (isPortalCoolingDown()) {
+          console.log("[attendflow-scheduler] portal cooling down — skipping student", s.id);
+          continue;
+        }
         try {
-          const payload = await syncStudent(s.id, { force: false });
+          const payload = await syncStudent(s.id, { force: false, purpose: "background" });
+          console.log(
+            "[attendflow-scheduler] synced student",
+            s.id,
+            "-",
+            payload.subjects.length,
+            "subjects"
+          );
           if (s.notifyLow) {
             const low = payload.subjects.filter(
               (x) => x.total > 0 && x.percentage < payload.settings.threshold
@@ -54,9 +69,15 @@ export async function register() {
               });
             }
           }
-        } catch {
+        } catch (e) {
           // Single student failing (portal down, password changed, rate limit)
           // must never stop the rest of the queue.
+          console.log(
+            "[attendflow-scheduler] sync failed for student",
+            s.id,
+            "-",
+            e instanceof Error ? e.message : e
+          );
         }
         await sleep(GAP_BETWEEN_STUDENTS_MS);
       }

@@ -1,5 +1,11 @@
 import { db } from "@/lib/db";
-import { fetchPortalSnapshot, PortalError } from "@/lib/portal";
+import {
+  fetchPortalSnapshot,
+  PortalError,
+  PORTAL_SESSION_REUSE_MS,
+  type PortalCookie,
+  type PortalPurpose,
+} from "@/lib/portal";
 import { encryptSecret, decryptSecret } from "@/lib/crypto";
 import { STALE_AFTER_MS, type DashboardPayload, type SubjectInfo, type LogInfo } from "@/lib/types";
 
@@ -83,6 +89,8 @@ export async function getDashboardData(studentDbId: string): Promise<DashboardPa
 
 /**
  * Persists a freshly scraped portal snapshot for a student.
+ * Subjects whose report could not be fetched (reportOk=false) keep their last
+ * stored values — we never overwrite real attendance with misleading zeros.
  */
 export async function persistSnapshot(
   studentDbId: string,
@@ -103,10 +111,12 @@ export async function persistSnapshot(
       incharge: snapshot.profile.incharge || student.incharge,
       lastSyncAt: new Date(),
       lastSyncOk: true,
+      ...(remember ? persistPortalCookies(snapshot) : { portalCookiesEnc: null, portalCookiesAt: null }),
     },
   });
 
   for (const s of snapshot.subjects) {
+    if (!s.reportOk) continue;
     await db.subjectAttendance.upsert({
       where: {
         studentId_subjectCode: { studentId: studentDbId, subjectCode: s.subjectCode },
@@ -158,9 +168,57 @@ export async function persistSnapshot(
   }
 }
 
+type PortalCookiesUpdate =
+  | { portalCookiesEnc: string; portalCookiesAt: Date }
+  | { portalCookiesEnc: null; portalCookiesAt: null };
+
+/**
+ * Encrypts the authenticated portal cookies of a snapshot for at-rest storage.
+ * Stored ONLY under the same explicit remember-me consent as the password —
+ * they are AES-256-GCM sealed like every other portal secret.
+ */
+function persistPortalCookies(snapshot: {
+  cookies: PortalCookie[];
+}): PortalCookiesUpdate {
+  if (!snapshot.cookies || snapshot.cookies.length === 0) {
+    return { portalCookiesEnc: null, portalCookiesAt: null };
+  }
+  try {
+    return {
+      portalCookiesEnc: encryptSecret(JSON.stringify(snapshot.cookies)),
+      portalCookiesAt: new Date(),
+    };
+  } catch {
+    return { portalCookiesEnc: null, portalCookiesAt: null };
+  }
+}
+
+/** Decrypts stored portal cookies, or null when absent/expired/unreadable. */
+function loadPortalCookies(student: {
+  portalCookiesEnc: string | null;
+  portalCookiesAt: Date | null;
+}): PortalCookie[] | null {
+  if (!student.portalCookiesEnc || !student.portalCookiesAt) return null;
+  if (Date.now() - student.portalCookiesAt.getTime() > PORTAL_SESSION_REUSE_MS) return null;
+  try {
+    const parsed = JSON.parse(decryptSecret(student.portalCookiesEnc));
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return parsed.filter(
+      (c): c is PortalCookie => c && typeof c.name === "string" && typeof c.value === "string"
+    );
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Runs a full portal scrape for the student, persists the snapshot and
  * returns the fresh dashboard payload. Throws PortalError / RateLimitError.
+ *
+ * Request pattern (gentle on the portal firewall):
+ *  1. Reuse the stored authenticated portal session when fresh — syncs then touch
+ *     only /DashBoardStudent + subject reports, never the rate-limited login page.
+ *  2. Fall back to a fresh portal login only when the session is missing/expired.
  */
 export async function syncStudent(
   studentDbId: string,
@@ -168,6 +226,7 @@ export async function syncStudent(
     credentials?: { rollNo: string; password: string };
     remember?: boolean;
     force?: boolean;
+    purpose?: PortalPurpose;
   }
 ): Promise<DashboardPayload> {
   const student = await db.student.findUnique({ where: { id: studentDbId } });
@@ -179,6 +238,16 @@ export async function syncStudent(
     (student.passwordEnc ? decryptSecret(student.passwordEnc) : null);
 
   if (!password) {
+    if (student.passwordEnc) {
+      // Stored payload is unreadable (e.g. server secret rotated). Self-heal:
+      // drop it so the student is simply asked to log in again next visit.
+      await db.student
+        .update({
+          where: { id: studentDbId },
+          data: { passwordEnc: null, portalCookiesEnc: null, portalCookiesAt: null },
+        })
+        .catch(() => {});
+    }
     throw new PortalError(
       "UNKNOWN",
       "Saved credentials are not available. Please log in again with your portal password to sync."
@@ -199,12 +268,23 @@ export async function syncStudent(
 
   const job = (async (): Promise<DashboardPayload> => {
     const remember = opts.remember ?? student.rememberMe;
+    const purpose: PortalPurpose = opts.purpose ?? "interactive";
     let ok = false;
     let message: string | null = null;
     try {
-      const snapshot = await fetchPortalSnapshot(rollNo, password);
+      // Freshly typed credentials mean an explicit login — always do a real login.
+      // Otherwise try the stored portal session first (fewer requests, no login page).
+      const storedCookies = opts.credentials ? null : loadPortalCookies(student);
+      const snapshot = await fetchPortalSnapshot(rollNo, password, {
+        existingCookies: storedCookies ?? undefined,
+        purpose,
+      });
       ok = true;
-      message = `Synced ${snapshot.subjects.length} subjects`;
+      const failedReports = snapshot.subjects.filter((s) => !s.reportOk).length;
+      message =
+        failedReports > 0
+          ? `Synced ${snapshot.subjects.length - failedReports}/${snapshot.subjects.length} subjects (${failedReports} report${failedReports === 1 ? "" : "s"} temporarily unavailable — previous values kept)`
+          : `Synced ${snapshot.subjects.length} subjects${snapshot.reusedSession ? " via saved portal session" : ""}`;
 
       await db.student.update({
         where: { id: studentDbId },
@@ -216,13 +296,15 @@ export async function syncStudent(
           incharge: snapshot.profile.incharge || student.incharge,
           rememberMe: remember,
           ...(remember ? { passwordEnc: encryptSecret(password) } : {}),
+          ...(remember ? persistPortalCookies(snapshot) : { portalCookiesEnc: null, portalCookiesAt: null }),
           lastSyncAt: new Date(),
           lastSyncOk: true,
         },
       });
 
-      // Upsert subjects
+      // Upsert subjects (skip subjects whose report failed — keep last real values)
       for (const s of snapshot.subjects) {
+        if (!s.reportOk) continue;
         await db.subjectAttendance.upsert({
           where: {
             studentId_subjectCode: { studentId: studentDbId, subjectCode: s.subjectCode },

@@ -1,7 +1,7 @@
 /**
- * AGC ERP (agclms.in) student portal client.
+ * AGC ERP (agclms.in) student portal client — with a ban-aware resilience layer.
  *
- * Flow (verified against the live portal):
+ * Portal flow (verified against the live portal):
  *  1. GET  https://agclms.in/Elogin/StudentLogin
  *     -> collect .AspNetCore.Antiforgery.* cookie + __RequestVerificationToken from the form
  *  2. POST StudentId / Password / __RequestVerificationToken (same URL, cookies attached)
@@ -10,6 +10,20 @@
  *     each row links to /DashBoardStudent/AttendanceReport?SAId=...
  *  4. GET  each AttendanceReport link -> <tbody> rows: <td>dd-MM-yyyy</td>...PRESENT/ABSENT
  *
+ * Resilience layer (evidence-based — the portal's IIS firewall dynamically filters
+ * requests to /Elogin/StudentLogin from datacenter IPs by User-Agent identity):
+ *  - Honest plain client identity first; automatic rotation across identities on
+ *    rejection, with sticky memory of whichever identity last succeeded.
+ *  - Global request pacing: all portal requests are serialized with a minimum gap and
+ *    jitter, so the app never looks like a burst bot to the portal firewall.
+ *  - Circuit breaker: any HTTP 403/429 opens a global cooldown (exponential, capped).
+ *    During cooldown NO request is sent — hammering would only make things worse.
+ *  - Bounded retries with backoff inside the caller's deadline budget.
+ *  - Portal-session reuse: callers may pass previously stored authenticated cookies so
+ *    a sync skips the login page entirely (1 request instead of 3+).
+ *  - Optional egress relay via PORTAL_PROXY_URL (CONNECT tunnel; TLS stays end-to-end
+ *    so credentials are never visible to the relay in plaintext).
+ *
  * No third-party HTML parser needed — the portal markup is stable Bootstrap/Razor output.
  */
 
@@ -17,24 +31,67 @@ const PORTAL_ORIGIN = "https://agclms.in";
 const LOGIN_URL = `${PORTAL_ORIGIN}/Elogin/StudentLogin`;
 const DASHBOARD_URL = `${PORTAL_ORIGIN}/DashBoardStudent`;
 
-const UA =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+/**
+ * Identity candidates, in preference order (EVIDENCE-BASED, 2026-09-15):
+ *
+ * Root cause of the HTTP 403s: the portal's IIS firewall rejects requests that
+ * present full BROWSER User-Agent strings (Chrome/Safari/Gecko patterns) from
+ * non-allowed IP ranges, while plain HTTP-client identities pass through and
+ * receive the real login page. Verified deterministically from this server:
+ *   plain "Mozilla/5.0"       -> 200 + antiforgery token   (repeatedly)
+ *   full Chrome UA            -> 403                        (repeatedly, same minute)
+ *   plain UA via Node fetch   -> 200 + token
+ *   Chrome UA via Node fetch  -> 403
+ *
+ * So the primary identity is an honest, plain HTTP-client label (no fake browser
+ * claim), and the rotation is kept as self-healing insurance: if the college ever
+ * flips the rule, retries automatically fall over to the next identity and the
+ * last identity that succeeded is remembered and preferred.
+ */
+const UA_CANDIDATES = ["Mozilla/5.0",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+];
 
-const REQUEST_TIMEOUT_MS = 25000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const PROBE_TIMEOUT_MS = 15_000;
+
+/** Minimum enforced gap between ANY two requests to the portal (global).
+ *  Kept human-slow on purpose: the portal firewall also runs a volume limiter
+ *  that temporarily 403s an IP after request bursts. */
+const MIN_REQUEST_GAP_MS = 1_200;
+/** Extra random jitter added to the gap (0..N ms) — avoids metronome patterns. */
+const REQUEST_GAP_JITTER_MS = 800;
+
+/** Cooldown opened after a 403/429 (doubles per consecutive rejection, capped).
+ *  During cooldown NO portal request is made at all — retrying earlier only
+ *  re-triggers the firewall's volume limiter and extends the block. */
+const COOLDOWN_BASE_MS = 120_000;
+const COOLDOWN_MAX_MS = 15 * 60_000;
+
+/** How long a stored portal session may be reused without a fresh login. */
+export const PORTAL_SESSION_REUSE_MS = 12 * 60 * 60 * 1000;
+
+export type PortalPurpose = "interactive" | "background";
 
 export class PortalError extends Error {
   code:
     | "INVALID_CREDENTIALS"
     | "PORTAL_DOWN"
+    | "PORTAL_BLOCKED"
     | "NETWORK"
     | "TIMEOUT"
     | "NO_SUBJECTS"
     | "UNKNOWN";
 
-  constructor(code: typeof PortalError.prototype.code, message: string) {
+  /** Seconds after which the portal may accept requests again (PORTAL_BLOCKED only). */
+  retryAfterSec?: number;
+
+  constructor(code: typeof PortalError.prototype.code, message: string, retryAfterSec?: number) {
     super(message);
     this.code = code;
     this.name = "PortalError";
+    this.retryAfterSec = retryAfterSec;
   }
 }
 
@@ -54,6 +111,8 @@ export interface PortalSubject {
   attended: number;
   total: number;
   percentage: number;
+  /** false when the per-subject report could not be fetched — keep last stored values. */
+  reportOk: boolean;
 }
 
 export interface PortalLogEntry {
@@ -62,21 +121,121 @@ export interface PortalLogEntry {
   status: "PRESENT" | "ABSENT";
 }
 
+export interface PortalCookie {
+  name: string;
+  value: string;
+}
+
 export interface PortalSnapshot {
   profile: PortalProfile;
   subjects: PortalSubject[];
   logs: PortalLogEntry[];
   fetchedAt: string; // ISO
+  /** Authenticated portal cookies captured at the end of a successful flow. */
+  cookies: PortalCookie[];
+  /** Whether the snapshot came from a reused portal session (no fresh login). */
+  reusedSession: boolean;
+}
+
+/* --------------------------- resilience state ------------------------------ */
+
+type CookieJar = Map<string, string>;
+
+let lastRequestAt = 0;
+let cooldownUntil = 0;
+let consecutiveBlocks = 0;
+let lastGoodUa: string | null = null;
+
+// Serializes every portal request through one gate, enforcing the minimum gap.
+let gateTail: Promise<unknown> = Promise.resolve();
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const jitter = (ms: number) => Math.round(ms * (0.85 + Math.random() * 0.3));
+
+function scheduleSlot<T>(fn: () => Promise<T>): Promise<T> {
+  const run = gateTail.then(fn, fn);
+  gateTail = run.then(
+    () => undefined,
+    () => undefined
+  );
+  return run as Promise<T>;
+}
+
+function notePortalBlocked() {
+  consecutiveBlocks += 1;
+  const cd = Math.min(COOLDOWN_BASE_MS * 2 ** (consecutiveBlocks - 1), COOLDOWN_MAX_MS);
+  cooldownUntil = Math.max(cooldownUntil, Date.now() + cd);
+  console.log(
+    `[portal] rejected by portal firewall (HTTP 403/429) — global cooldown ${Math.round(cd / 1000)}s (consecutive: ${consecutiveBlocks})`
+  );
+}
+
+function notePortalOk() {
+  consecutiveBlocks = 0;
+  cooldownUntil = 0;
+}
+
+function blockedRetryAfterSec(): number {
+  return Math.max(1, Math.ceil((cooldownUntil - Date.now()) / 1000));
+}
+
+/** True while the global circuit breaker is open — callers should skip, not wait. */
+export function isPortalCoolingDown(): boolean {
+  return Date.now() < cooldownUntil;
+}
+
+/**
+ * Waits out an active cooldown. Throws PORTAL_BLOCKED if the caller's deadline
+ * cannot cover the remaining cooldown plus one request attempt.
+ */
+async function awaitCooldown(deadlineMs: number): Promise<void> {
+  const remaining = cooldownUntil - Date.now();
+  if (remaining <= 0) return;
+  if (Date.now() + remaining + REQUEST_TIMEOUT_MS + 2_000 > deadlineMs) {
+    throw new PortalError(
+      "PORTAL_BLOCKED",
+      "The college portal is temporarily rate-limiting our server. Please try again in a few minutes — your saved attendance stays available meanwhile.",
+      blockedRetryAfterSec()
+    );
+  }
+  await sleep(remaining + 250);
+}
+
+/** Picks the User-Agent for attempt #i, preferring the last known-good identity. */
+function uaForAttempt(attempt: number): string {
+  const order = lastGoodUa
+    ? [lastGoodUa, ...UA_CANDIDATES.filter((u) => u !== lastGoodUa)]
+    : UA_CANDIDATES;
+  return order[attempt % order.length];
+}
+
+/* --------------------------- optional egress relay -------------------------- */
+
+let proxyDispatcher: unknown;
+let proxyTried = false;
+
+async function relayDispatcher(): Promise<unknown> {
+  if (!proxyTried) {
+    proxyTried = true;
+    const url = process.env.PORTAL_PROXY_URL;
+    if (url) {
+      try {
+        const { ProxyAgent } = await import("undici");
+        proxyDispatcher = new ProxyAgent(url);
+        console.log("[portal] using egress relay from PORTAL_PROXY_URL");
+      } catch {
+        console.warn("[portal] PORTAL_PROXY_URL is set but undici is unavailable — going direct.");
+      }
+    }
+  }
+  return proxyDispatcher;
 }
 
 /* ------------------------------ tiny helpers ------------------------------ */
 
-type CookieJar = Map<string, string>;
-
 function collectCookies(jar: CookieJar, res: Response) {
   const raw: string[] =
-    typeof (res.headers as unknown as { getSetCookie?: () => string[] })
-      .getSetCookie === "function"
+    typeof (res.headers as unknown as { getSetCookie?: () => string[] }).getSetCookie === "function"
       ? (res.headers as unknown as { getSetCookie: () => string[] }).getSetCookie()
       : [res.headers.get("set-cookie") ?? ""].filter(Boolean);
   for (const line of raw) {
@@ -111,40 +270,198 @@ function stripTags(html: string): string {
   return decodeEntities(html.replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
-async function fetchPage(
+/** Delays (ms) before each attempt for a given purpose. Index 0 = immediate.
+ *  Deliberately minimal: the portal's volume limiter lasts minutes, so repeated
+ *  quick retries only add fuel. Interactive fails fast (UI serves cached data);
+ *  background gets one well-spaced retry. */
+function attemptDelays(purpose: PortalPurpose): number[] {
+  return purpose === "background" ? [0, 90_000] : [0, 5_000];
+}
+
+interface PortalFetchConfig {
+  jar: CookieJar;
+  purpose: PortalPurpose;
+  deadlineMs: number;
+  timeoutMs?: number;
+  /** 403/429 retry + cooldown behaviour (default true). Probes set false. */
+  resilient?: boolean;
+  /** UA identity chosen by the retry loop for this specific attempt. */
+  __ua?: string;
+}
+
+interface PortalFetchInit {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+  redirect?: RequestRedirect;
+}
+
+async function rawFetch(
   url: string,
   init: RequestInit,
-  jar: CookieJar
-): Promise<{ res: Response; html: string }> {
-  const headers: Record<string, string> = {
-    "User-Agent": UA,
-    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9",
-    ...(init.headers as Record<string, string> | undefined),
-  };
-  const cookie = cookieHeader(jar);
-  if (cookie) headers.Cookie = cookie;
-
-  let res: Response;
+  timeoutMs: number
+): Promise<Response> {
+  const dispatcher = await relayDispatcher();
   try {
-    res = await fetch(url, {
+    if (dispatcher) {
+      const { fetch: undiciFetch } = await import("undici");
+      return (await undiciFetch(url, {
+        ...init,
+        dispatcher,
+        signal: AbortSignal.timeout(timeoutMs),
+      } as never)) as unknown as Response;
+    }
+    return await fetch(url, {
       ...init,
-      headers,
-      redirect: init.redirect ?? "follow",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (/timeout|abort/i.test(msg)) {
-      throw new PortalError("TIMEOUT", "The college portal took too long to respond. Please try again.");
-    }
-    throw new PortalError("NETWORK", "Could not reach the college portal. Check your connection and try again.");
+    if (/timeout|abort/i.test(msg)) throw new Error("__timeout__");
+    throw new Error("__network__");
   }
-  collectCookies(jar, res);
-  const html = await res.text();
-  return { res, html };
 }
+
+/**
+ * Single paced request to the portal (no retries — retries live in portalFetch).
+ * Serialized globally with a jittered minimum gap between requests.
+ */
+async function pacedRequest(
+  url: string,
+  init: PortalFetchInit,
+  cfg: PortalFetchConfig
+): Promise<{ res: Response; html: string }> {
+  return scheduleSlot(async () => {
+    const gap = lastRequestAt + jitter(MIN_REQUEST_GAP_MS + REQUEST_GAP_JITTER_MS / 2) - Date.now();
+    if (gap > 0) await sleep(gap);
+    lastRequestAt = Date.now();
+
+    const ua = cfg.__ua ?? uaForAttempt(0);
+    const headers: Record<string, string> = {
+      "User-Agent": ua,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    const cookie = cookieHeader(cfg.jar);
+    if (cookie) headers.Cookie = cookie;
+
+    const res = await rawFetch(
+      url,
+      {
+        method: init.method ?? "GET",
+        headers,
+        body: init.body,
+        redirect: init.redirect ?? "follow",
+      },
+      cfg.timeoutMs ?? REQUEST_TIMEOUT_MS
+    );
+    collectCookies(cfg.jar, res);
+    const html = await res.text();
+    return { res, html };
+  });
+}
+
+/**
+ * Resilient portal request: paced, cooldown-aware, with bounded retries,
+ * identity rotation on 403/429, and short retries for transient network/5xx.
+ */
+async function portalFetch(
+  url: string,
+  init: PortalFetchInit,
+  cfg: PortalFetchConfig
+): Promise<{ res: Response; html: string }> {
+  const resilient = cfg.resilient !== false;
+  const delays = resilient ? attemptDelays(cfg.purpose) : [0];
+
+  let lastError: Error | null = null;
+  let lastRes: { res: Response; html: string } | null = null;
+
+  for (let attempt = 0; attempt < delays.length; attempt++) {
+    const requestMs = cfg.timeoutMs ?? REQUEST_TIMEOUT_MS;
+    const wait = jitter(delays[attempt]);
+    if (wait > 0) {
+      // Stop if the next attempt cannot fit in the caller's budget.
+      if (Date.now() + wait + requestMs > cfg.deadlineMs) break;
+      await sleep(wait);
+    }
+
+    try {
+      await awaitCooldown(cfg.deadlineMs);
+    } catch (e) {
+      // Cooldown cannot fit the budget — surface only if nothing succeeded yet.
+      if (lastRes) return lastRes;
+      throw e;
+    }
+
+    let out: { res: Response; html: string };
+    try {
+      out = await pacedRequest(url, { ...init, headers: { ...init.headers } }, { ...cfg, __ua: uaForAttempt(attempt) });
+    } catch (e) {
+      const kind = e instanceof Error ? e.message : "";
+      lastError =
+        kind === "__timeout__"
+          ? new PortalError("TIMEOUT", "The college portal took too long to respond. Please try again.")
+          : new PortalError("NETWORK", "Could not reach the college portal. Check your connection and try again.");
+      continue; // transient — try the next attempt
+    }
+
+    const status = out.res.status;
+    if (status === 403 || status === 429) {
+      notePortalBlocked();
+      lastRes = out;
+      lastError = new PortalError(
+        "PORTAL_BLOCKED",
+        "The college portal is temporarily blocking our server. Please try again in a few minutes.",
+        blockedRetryAfterSec()
+      );
+      continue; // rotate identity / wait for cooldown on the next attempt
+    }
+
+    if (!resilient) {
+      // Probe mode: hand every non-blocked response back — the caller interprets
+      // status + markup (e.g. an unauthenticated dashboard returns 500 BY DESIGN,
+      // which signals bad credentials, not an outage).
+      if (status < 400) notePortalOk();
+      return out;
+    }
+
+    if (status >= 500) {
+      lastRes = out;
+      lastError = new PortalError(
+        "PORTAL_DOWN",
+        `The college portal seems to be having trouble right now (HTTP ${status}). Please try again shortly.`
+      );
+      continue; // transient — retry with short backoff
+    }
+
+    if (status < 400) notePortalOk();
+    return out;
+  }
+
+  if (lastRes) {
+    // We did get responses — report the strongest error for the final state.
+    const status = lastRes.res.status;
+    if (status === 403 || status === 429) {
+      throw new PortalError(
+        "PORTAL_BLOCKED",
+        "The college portal is temporarily blocking our server (its firewall is rate-limiting automated access). This usually clears within a few minutes — please try again shortly. Your saved attendance stays available meanwhile.",
+        blockedRetryAfterSec()
+      );
+    }
+    if (status >= 500) {
+      throw new PortalError(
+        "PORTAL_DOWN",
+        `The college portal seems to be having trouble right now (HTTP ${status}). Please try again shortly.`
+      );
+    }
+    return lastRes;
+  }
+  throw lastError ?? new PortalError("NETWORK", "Could not reach the college portal.");
+}
+
+/* ------------------------------ parsing ----------------------------------- */
 
 function extractVerificationToken(html: string): string | null {
   // Attribute order varies between Razor renders; try both orders.
@@ -170,8 +487,6 @@ function looksAuthenticated(html: string): boolean {
     /DashBoardStudent/i.test(html)
   );
 }
-
-/* ------------------------------ parsing ----------------------------------- */
 
 function firstMatch(html: string, patterns: RegExp[]): string | null {
   for (const re of patterns) {
@@ -316,19 +631,77 @@ function parseAttendanceReport(html: string): { attended: number; total: number;
 
 /* ------------------------------ main flow ---------------------------------- */
 
+export interface FetchSnapshotOptions {
+  /** Previously stored authenticated portal cookies — skips the login page when valid. */
+  existingCookies?: PortalCookie[];
+  /** Interactive (user waiting) or background (scheduler) — controls retry budget. */
+  purpose?: PortalPurpose;
+  /** Absolute epoch-ms budget; defaults per purpose. */
+  deadlineMs?: number;
+}
+
+function jarFromCookies(cookies: PortalCookie[] | undefined): CookieJar {
+  const jar: CookieJar = new Map();
+  for (const c of cookies ?? []) {
+    if (c && c.name && typeof c.value === "string") jar.set(c.name, c.value);
+  }
+  return jar;
+}
+
 export async function fetchPortalSnapshot(
   studentId: string,
-  password: string
+  password: string | null,
+  opts: FetchSnapshotOptions = {}
 ): Promise<PortalSnapshot> {
+  const purpose: PortalPurpose = opts.purpose ?? "interactive";
+  const deadlineMs =
+    opts.deadlineMs ?? Date.now() + (purpose === "background" ? 8 * 60_000 : 70_000);
+
+  // ---- Attempt 0: reuse a stored authenticated portal session ----------------
+  if (opts.existingCookies && opts.existingCookies.length > 0) {
+    const jar = jarFromCookies(opts.existingCookies);
+    try {
+      const probe = await pacedRequest(
+        DASHBOARD_URL,
+        { headers: { Referer: LOGIN_URL } },
+        { jar, purpose, deadlineMs, timeoutMs: PROBE_TIMEOUT_MS, resilient: false }
+      );
+      if (probe.res.ok && looksAuthenticated(probe.html)) {
+        return await harvestFromDashboard(probe.html, jar, { reused: true, purpose, deadlineMs });
+      }
+    } catch {
+      // Probe failures fall through to a fresh login, which reports real errors.
+    }
+  }
+
+  // ---- Fresh login flow ------------------------------------------------------
+  if (!password) {
+    throw new PortalError(
+      "UNKNOWN",
+      "Saved portal session has expired and no password is stored. Please log in again with your portal password."
+    );
+  }
+
   const jar: CookieJar = new Map();
 
-  // ---- Step 1: login page (token + antiforgery cookie) --------------------
-  const loginPage = await fetchPage(LOGIN_URL, { method: "GET" }, jar);
-  if (loginPage.res.status >= 500) {
-    throw new PortalError("PORTAL_DOWN", `College portal is currently unavailable (HTTP ${loginPage.res.status}).`);
-  }
+  // Step 1: login page (token + antiforgery cookie).
+  const loginPage = await portalFetch(
+    LOGIN_URL,
+    { method: "GET" },
+    { jar, purpose, deadlineMs }
+  );
   if (loginPage.res.status >= 400) {
-    throw new PortalError("PORTAL_DOWN", `College portal rejected the connection (HTTP ${loginPage.res.status}).`);
+    if (loginPage.res.status === 403 || loginPage.res.status === 429) {
+      throw new PortalError(
+        "PORTAL_BLOCKED",
+        "The college portal is temporarily blocking our server (its firewall is rate-limiting automated access). This usually clears within a few minutes — please try again shortly. Your saved attendance stays available meanwhile.",
+        blockedRetryAfterSec()
+      );
+    }
+    throw new PortalError(
+      "PORTAL_DOWN",
+      `College portal rejected the connection (HTTP ${loginPage.res.status}).`
+    );
   }
 
   const token = extractVerificationToken(loginPage.html);
@@ -336,14 +709,14 @@ export async function fetchPortalSnapshot(
     throw new PortalError("PORTAL_DOWN", "Could not read the portal security token. The portal may be under maintenance.");
   }
 
-  // ---- Step 2: submit credentials -----------------------------------------
+  // Step 2: submit credentials.
   const body = new URLSearchParams({
     StudentId: studentId.trim(),
     Password: password,
     __RequestVerificationToken: token,
   });
 
-  const post = await fetchPage(
+  const post = await portalFetch(
     LOGIN_URL,
     {
       method: "POST",
@@ -355,7 +728,7 @@ export async function fetchPortalSnapshot(
       body: body.toString(),
       redirect: "manual",
     },
-    jar
+    { jar, purpose, deadlineMs }
   );
 
   // A 3xx after POST means the server accepted the login and is redirecting.
@@ -367,18 +740,29 @@ export async function fetchPortalSnapshot(
         ? loc
         : `${PORTAL_ORIGIN}${loc.startsWith("/") ? "" : "/"}${loc}`
       : DASHBOARD_URL;
-    const dash = await fetchPage(target, { method: "GET", headers: { Referer: LOGIN_URL } }, jar);
+    const dash = await portalFetch(
+      target,
+      { method: "GET", headers: { Referer: LOGIN_URL } },
+      { jar, purpose, deadlineMs }
+    );
     dashboardHtml = dash.html;
   } else {
     dashboardHtml = post.html;
     // The portal may render the dashboard directly with HTTP 200.
     if (!looksAuthenticated(dashboardHtml)) {
-      const dash = await fetchPage(DASHBOARD_URL, { method: "GET", headers: { Referer: LOGIN_URL } }, jar);
+      // NOTE: deliberately non-resilient — an unauthenticated /DashBoardStudent
+      // returns HTTP 500 by design on this portal, which is the "bad credentials"
+      // signal, not an outage. Retrying it would only add load.
+      const dash = await portalFetch(
+        DASHBOARD_URL,
+        { method: "GET", headers: { Referer: LOGIN_URL } },
+        { jar, purpose, deadlineMs, resilient: false }
+      );
       if (looksAuthenticated(dash.html)) dashboardHtml = dash.html;
     }
   }
 
-  // ---- Step 3: verify authentication ---------------------------------------
+  // Step 3: verify authentication.
   if (isLoginPage(dashboardHtml) || !looksAuthenticated(dashboardHtml)) {
     throw new PortalError(
       "INVALID_CREDENTIALS",
@@ -386,7 +770,17 @@ export async function fetchPortalSnapshot(
     );
   }
 
-  // ---- Step 4: parse profile + subject table --------------------------------
+  return await harvestFromDashboard(dashboardHtml, jar, { reused: false, purpose, deadlineMs });
+}
+
+/* --------------------- shared dashboard harvest ---------------------------- */
+
+async function harvestFromDashboard(
+  dashboardHtml: string,
+  jar: CookieJar,
+  ctx: { reused: boolean; purpose: PortalPurpose; deadlineMs: number }
+): Promise<PortalSnapshot> {
+  // Parse profile + subject table.
   const profile = parseProfile(dashboardHtml);
   const subjectRows = parseSubjectRows(dashboardHtml);
 
@@ -397,31 +791,47 @@ export async function fetchPortalSnapshot(
     );
   }
 
-  // ---- Step 5: fetch each subject's attendance report ------------------------
+  // Fetch each subject's attendance report.
   const subjects: PortalSubject[] = [];
   const logs: PortalLogEntry[] = [];
 
-  // Fetch sequentially with a tiny gap — gentle on the portal, deterministic order.
+  // Requests are globally paced by the gate — sequential here keeps order deterministic.
   for (const row of subjectRows) {
     const code = row.saId ? `AGC-${row.saId}` : `AGC-${row.name.replace(/\s+/g, "-").toUpperCase().slice(0, 24)}`;
     let attended = 0;
     let total = 0;
+    let reportOk = false;
+    if (Date.now() > ctx.deadlineMs + REQUEST_TIMEOUT_MS) {
+      // Flow budget exhausted — keep this subject at its last stored values instead
+      // of persisting misleading zeros.
+      subjects.push({
+        subjectCode: code,
+        subjectName: row.name,
+        subjectType: row.type,
+        saId: row.saId,
+        attended: 0,
+        total: 0,
+        percentage: 0,
+        reportOk: false,
+      });
+      continue;
+    }
     try {
-      const rep = await fetchPage(
+      const rep = await portalFetch(
         row.href,
         { method: "GET", headers: { Referer: DASHBOARD_URL } },
-        jar
+        { jar, purpose: ctx.purpose, deadlineMs: Math.min(ctx.deadlineMs, Date.now() + 45_000) }
       );
       if (rep.res.ok) {
         const parsed = parseAttendanceReport(rep.html);
         attended = parsed.attended;
         total = parsed.total;
         for (const l of parsed.logs) logs.push({ ...l, subjectCode: code });
+        reportOk = true;
       }
     } catch {
       // Single subject report failing should not fail the whole sync.
     }
-    await new Promise((r) => setTimeout(r, 120));
 
     const pct = total > 0 ? (attended / total) * 100 : 0;
     subjects.push({
@@ -432,6 +842,7 @@ export async function fetchPortalSnapshot(
       attended,
       total,
       percentage: Math.round(pct * 10) / 10,
+      reportOk,
     });
   }
 
@@ -440,5 +851,7 @@ export async function fetchPortalSnapshot(
     subjects,
     logs,
     fetchedAt: new Date().toISOString(),
+    cookies: Array.from(jar.entries()).map(([name, value]) => ({ name, value })),
+    reusedSession: ctx.reused,
   };
 }

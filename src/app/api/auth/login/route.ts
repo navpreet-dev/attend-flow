@@ -68,9 +68,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Scrape the portal (stateless — nothing is stored until login succeeds).
+  // An explicit login is always a real fresh portal login (interactive budget).
   let snapshot;
   try {
-    snapshot = await fetchPortalSnapshot(rollNo, password);
+    snapshot = await fetchPortalSnapshot(rollNo, password, { purpose: "interactive" });
   } catch (e) {
     if (e instanceof PortalError) {
       if (e.code === "INVALID_CREDENTIALS") {
