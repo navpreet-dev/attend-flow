@@ -9,6 +9,7 @@ import { enablePushAlerts, registerServiceWorker } from "@/lib/push-client";
 import { LoginView } from "./login-view";
 import { DashboardView } from "./dashboard-view";
 import { AboutDialog } from "./about-dialog";
+import { SyncProgressOverlay, useSyncProgress } from "./sync-progress-overlay";
 
 type Status = "loading" | "anon" | "ready";
 
@@ -16,6 +17,16 @@ export function AttendFlowApp() {
   const [status, setStatus] = useState<Status>("loading");
   const [data, setData] = useState<DashboardPayload | null>(null);
   const [offline, setOffline] = useState(false);
+
+  // Login-time sync progress overlay (driven by the real request lifecycle).
+  const {
+    phase: syncPhase,
+    view: syncView,
+    percent: syncPercent,
+    begin: syncBegin,
+    finish: syncFinish,
+    fade: syncFade,
+  } = useSyncProgress();
 
   // Boot: check session (fall back to offline cache) + prep the service worker.
   useEffect(() => {
@@ -60,12 +71,26 @@ export function AttendFlowApp() {
     };
   }, []);
 
-  const handleLogin = useCallback(async (rollNo: string, password: string, remember: boolean) => {
-    const payload = await apiLogin(rollNo, password, remember);
-    clearCachedPayload();
-    setData(payload);
-    setOffline(false);
-    setStatus("ready");
+  const handleLogin = useCallback(
+    async (rollNo: string, password: string, remember: boolean) => {
+      syncBegin();
+      let payload: DashboardPayload;
+      try {
+        payload = await apiLogin(rollNo, password, remember);
+      } catch (err) {
+        // Sync failed — fade the overlay away and let the login form's existing
+        // error box show the message exactly as before.
+        syncFade();
+        throw err;
+      }
+      // Real payload received — complete the bar to 100%, then reveal the
+      // dashboard beneath the overlay and let it fade away naturally.
+      await syncFinish();
+      clearCachedPayload();
+      setData(payload);
+      setOffline(false);
+      setStatus("ready");
+      syncFade();
 
     // Right after login: ask once for notification permission so low-attendance
     // alerts can reach the student even when the site is closed (Web Push).
@@ -86,7 +111,9 @@ export function AttendFlowApp() {
         void enablePushAlerts();
       }
     })();
-  }, []);
+    },
+    [syncBegin, syncFinish, syncFade]
+  );
 
   const handleData = useCallback((d: DashboardPayload) => {
     setData(d);
@@ -123,6 +150,8 @@ export function AttendFlowApp() {
           onLogout={handleLogout}
         />
       )}
+
+      <SyncProgressOverlay phase={syncPhase} view={syncView} percent={syncPercent} />
 
       <footer className="mt-auto border-t border-border/70 py-4">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 text-xs text-muted-foreground sm:flex-row">
