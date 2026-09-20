@@ -14,6 +14,7 @@ export interface SubjectInfo {
   attended: number;
   total: number;
   percentage: number;
+  saId?: string;
 }
 
 export interface LogInfo {
@@ -45,6 +46,7 @@ export interface DashboardPayload {
   lastSyncOk: boolean | null;
   stale: boolean;
   recentSyncs: SyncEventInfo[];
+  error?: string;
 }
 
 export const STALE_AFTER_MS = 6 * 60 * 60 * 1000; // 6 hours

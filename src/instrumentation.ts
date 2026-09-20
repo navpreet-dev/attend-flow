@@ -9,6 +9,7 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
+  if (process.env.NEXT_PHASE === "phase-production-build") return;
 
   const g = globalThis as typeof globalThis & { __attendflowScheduler?: boolean };
   if (g.__attendflowScheduler) return;
@@ -23,64 +24,11 @@ export async function register() {
 
   async function tick() {
     try {
-      const { db } = await import("@/lib/db");
-      const { syncStudent } = await import("@/lib/sync-service");
-      const { isPortalCoolingDown } = await import("@/lib/portal");
-      const { sendPushToStudent } = await import("@/lib/push-server");
-
-      const students = await db.student.findMany({
-        where: { rememberMe: true, autoSync: true, NOT: { passwordEnc: null } },
-        select: { id: true, notifyLow: true, threshold: true, lastSyncAt: true },
-      });
-
-      for (const s of students) {
-        // Only touch the portal when our snapshot is stale.
-        if (s.lastSyncAt && Date.now() - s.lastSyncAt.getTime() < STALE_AFTER_MS) continue;
-        // Circuit breaker open? Skip this student entirely — waiting here and poking
-        // the portal would only keep the firewall's limiter alive. The next tick
-        // (or a later student slot) picks them up.
-        if (isPortalCoolingDown()) {
-          console.log("[attendflow-scheduler] portal cooling down — skipping student", s.id);
-          continue;
-        }
-        try {
-          const payload = await syncStudent(s.id, { force: false, purpose: "background" });
-          console.log(
-            "[attendflow-scheduler] synced student",
-            s.id,
-            "-",
-            payload.subjects.length,
-            "subjects"
-          );
-          if (s.notifyLow) {
-            const low = payload.subjects.filter(
-              (x) => x.total > 0 && x.percentage < payload.settings.threshold
-            );
-            if (low.length > 0) {
-              const worst = low[0];
-              await sendPushToStudent(s.id, {
-                title: "Low attendance warning",
-                body:
-                  low.length === 1
-                    ? `${worst.subjectName} is at ${worst.percentage.toFixed(1)}% (below ${payload.settings.threshold}%). Attend next classes to recover.`
-                    : `${low.length} subjects are below ${payload.settings.threshold}%. Lowest: ${worst.subjectName} at ${worst.percentage.toFixed(1)}%.`,
-                tag: "attendflow-low-attendance",
-                url: "/",
-              });
-            }
-          }
-        } catch (e) {
-          // Single student failing (portal down, password changed, rate limit)
-          // must never stop the rest of the queue.
-          console.log(
-            "[attendflow-scheduler] sync failed for student",
-            s.id,
-            "-",
-            e instanceof Error ? e.message : e
-          );
-        }
-        await sleep(GAP_BETWEEN_STUDENTS_MS);
-      }
+      const { runSchedulerTick } = await import("@/lib/scheduler-sync");
+      const result = await runSchedulerTick();
+      console.log(
+        `[attendflow-scheduler] Tick complete: ${result.synced} synced, ${result.skippedFresh} fresh, ${result.skippedCoolingDown} cooling down, ${result.errors} errors (${result.durationMs}ms)`
+      );
     } catch (e) {
       console.error("[attendflow-scheduler] tick failed:", e);
     }
@@ -88,8 +36,10 @@ export async function register() {
 
   async function loop() {
     await tick();
-    setTimeout(loop, INTERVAL_MS);
+    const t = setTimeout(loop, INTERVAL_MS);
+    t.unref?.();
   }
 
-  setTimeout(() => void loop(), INITIAL_DELAY_MS);
+  const initialTimer = setTimeout(() => void loop(), INITIAL_DELAY_MS);
+  initialTimer.unref?.();
 }

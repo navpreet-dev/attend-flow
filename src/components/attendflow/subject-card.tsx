@@ -37,11 +37,13 @@ export function SubjectCard({
   data,
   threshold,
   index,
+  onOpenSimulator,
 }: {
   subject: SubjectInfo;
   data: DashboardPayload;
   threshold: number;
   index: number;
+  onOpenSimulator?: (code: string) => void;
 }) {
   const level = pctColor(subject.percentage, threshold);
   const c = COLOR[level];
@@ -110,55 +112,74 @@ export function SubjectCard({
             )}
           </div>
 
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="ghost" size="sm" className="mt-auto w-full justify-between rounded-lg text-[13px] text-muted-foreground hover:text-foreground">
-                View class log ({subjectLogs.length})
-                <ChevronRight className="h-4 w-4" aria-hidden="true" />
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="rounded-2xl sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>{subject.subjectName}</DialogTitle>
-                <DialogDescription>
-                  {subject.attended} of {subject.total} classes attended ·{" "}
-                  {subject.percentage.toFixed(1)}% attendance
-                </DialogDescription>
-              </DialogHeader>
-              <Separator />
-              <ScrollArea className="max-h-[50vh] pr-3 [&>[data-slot=scroll-area-viewport]]:max-h-[50vh]">
-                {subjectLogs.length === 0 ? (
-                  <p className="py-6 text-center text-sm text-muted-foreground">
-                    No dated class records found on the portal for this subject.
-                  </p>
-                ) : (
-                  <ul className="space-y-1.5">
-                    {subjectLogs.map((l, i) => (
-                      <li
-                        key={`${l.date}-${i}`}
-                        className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
-                      >
-                        <span className="flex items-center gap-2 text-muted-foreground">
-                          <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
-                          {l.date}
-                        </span>
-                        <Badge
-                          variant="outline"
-                          className={
-                            l.status === "PRESENT"
-                              ? "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
-                              : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400"
-                          }
+          <div className="mt-auto flex items-center gap-1.5 pt-1">
+            <Dialog>
+              <DialogTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 justify-between rounded-lg text-xs text-muted-foreground hover:text-foreground h-8 px-2.5"
+                >
+                  <span>Class log ({subjectLogs.length})</span>
+                  <ChevronRight className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="rounded-2xl sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>{subject.subjectName}</DialogTitle>
+                  <DialogDescription>
+                    {subject.attended} of {subject.total} classes attended ·{" "}
+                    {subject.percentage.toFixed(1)}% attendance
+                  </DialogDescription>
+                </DialogHeader>
+                <Separator />
+                <ScrollArea className="max-h-[50vh] pr-3 [&>[data-slot=scroll-area-viewport]]:max-h-[50vh]">
+                  {subjectLogs.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">
+                      No dated class records found on the portal for this subject.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1.5">
+                      {subjectLogs.map((l, i) => (
+                        <li
+                          key={`${l.date}-${i}`}
+                          className="flex items-center justify-between rounded-md border px-3 py-2 text-sm"
                         >
-                          {l.status}
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </ScrollArea>
-            </DialogContent>
-          </Dialog>
+                          <span className="flex items-center gap-2 text-muted-foreground">
+                            <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+                            {l.date}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className={
+                              l.status === "PRESENT"
+                                ? "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
+                                : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400"
+                            }
+                          >
+                            {l.status}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </ScrollArea>
+              </DialogContent>
+            </Dialog>
+
+            {onOpenSimulator && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 rounded-lg text-xs px-2.5 gap-1 shrink-0 text-emerald-600 dark:text-emerald-400 border-emerald-600/25 hover:bg-emerald-600/10"
+                onClick={() => onOpenSimulator(subject.subjectCode)}
+                title="Open What-If Simulator for this subject"
+              >
+                <TrendingUp className="h-3.5 w-3.5" />
+                <span>Simulate</span>
+              </Button>
+            )}
+          </div>
         </CardContent>
       </Card>
     </motion.div>

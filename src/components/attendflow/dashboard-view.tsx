@@ -32,6 +32,7 @@ import {
   AlertTriangle,
   BellRing,
   CalendarCheck2,
+  Calculator,
   CheckCircle2,
   ClipboardCheck,
   Clock3,
@@ -47,6 +48,7 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
+  Sparkles,
   TrendingUp,
   WifiOff,
 } from "lucide-react";
@@ -65,6 +67,11 @@ import { apiSettings, apiLogout, apiSync, cachePayload, SessionExpiredError } fr
 import { ThemeToggle } from "./theme-toggle";
 import { SubjectCard } from "./subject-card";
 import { TrendsCharts } from "./trends-chart";
+import { CalculatorSimulatorView } from "./calculator-simulator-view";
+import { NotificationsPopover } from "./notifications-popover";
+import { SyncSummaryDialog } from "./sync-summary-dialog";
+import { generateSyncSummary, type SyncSummary } from "@/lib/sync-summary";
+import { enablePushAlerts, disablePushAlerts, registerServiceWorker } from "@/lib/push-client";
 
 interface DashboardViewProps {
   data: DashboardPayload;
@@ -76,6 +83,11 @@ interface DashboardViewProps {
 export function DashboardView({ data, offline, onData, onLogout }: DashboardViewProps) {
   const [syncing, setSyncing] = useState(false);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>("overview");
+  const [selectedToolSubject, setSelectedToolSubject] = useState<string>("OVERALL");
+  const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
+  const [prevData, setPrevData] = useState<DashboardPayload | null>(null);
   const notifiedRef = useRef<string>("");
 
   const threshold = data.settings.threshold;
@@ -86,6 +98,47 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
         .filter((s) => s.total > 0 && s.percentage < threshold)
         .sort((a, b) => a.percentage - b.percentage),
     [data.subjects, threshold]
+  );
+
+  const runSync = useCallback(
+    async (silent = false) => {
+      if (syncing) return;
+      setSyncing(true);
+      try {
+        const prev = data;
+        const fresh = await apiSync();
+        setPrevData(prev);
+        onData(fresh);
+
+        try {
+          const summary = generateSyncSummary(prev, fresh);
+          setSyncSummary(summary);
+          if (!silent && !fresh.error) {
+            setShowSummaryDialog(true);
+          }
+        } catch {
+          /* summary generation failures must never fail the sync */
+        }
+
+        if (fresh.error) {
+          toast.warning(fresh.error);
+        } else if (!silent) {
+          toast.success("Attendance synced with the college portal.");
+        }
+      } catch (e) {
+        if (e instanceof SessionExpiredError) {
+          toast.error(e.message);
+          setTimeout(() => onLogout(), 600);
+          return;
+        }
+        const msg = e instanceof Error ? e.message : "Sync failed.";
+        if (!silent) toast.error(msg);
+        else if (msg.includes("log in")) toast.error(msg);
+      } finally {
+        setSyncing(false);
+      }
+    },
+    [data, onData, onLogout, syncing]
   );
 
   // Cache for offline access
@@ -102,7 +155,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
       autoSyncedRef.current = true;
       void runSync(true);
     }
-  }, [data.stale, data.settings.autoSync, data.settings.rememberMe, offline]);
+  }, [data.stale, data.settings.autoSync, data.settings.rememberMe, offline, runSync]);
 
   // Low-attendance browser notifications (once per dataset)
   useEffect(() => {
@@ -125,34 +178,6 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
     }
   }, [data.settings.notifyLow, data.lastSyncAt, lowSubjects, threshold]);
 
-  const runSync = useCallback(
-    async (silent = false) => {
-      if (syncing) return;
-      setSyncing(true);
-      try {
-        const fresh = await apiSync();
-        onData(fresh);
-        if (fresh.error) {
-          toast.warning(fresh.error);
-        } else if (!silent) {
-          toast.success("Attendance synced with the college portal.");
-        }
-      } catch (e) {
-        if (e instanceof SessionExpiredError) {
-          toast.error(e.message);
-          setTimeout(() => onLogout(), 600);
-          return;
-        }
-        const msg = e instanceof Error ? e.message : "Sync failed.";
-        if (!silent) toast.error(msg);
-        else if (msg.includes("log in")) toast.error(msg);
-      } finally {
-        setSyncing(false);
-      }
-    },
-    [onData, onLogout, syncing]
-  );
-
   async function handleLogout() {
     try {
       await apiLogout();
@@ -174,19 +199,24 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
     }
   }
 
+  // Register service worker for Web Push notifications
+  useEffect(() => {
+    registerServiceWorker();
+  }, []);
+
   async function enableNotifications() {
-    if (typeof Notification === "undefined") {
+    if (typeof window === "undefined" || !("Notification" in window)) {
       toast.error("Notifications are not supported in this browser.");
       return;
     }
-    const perm = await Notification.requestPermission();
-    if (perm === "granted") {
+    const result = await enablePushAlerts();
+    if (result === "granted") {
       await updateSettings({ notifyLow: true });
-      new Notification("AttendFlow alerts enabled", {
-        body: "You'll get a notification whenever any subject drops below your target.",
-      });
+      toast.success("Push alerts enabled. You'll receive alerts even when the tab is closed.");
+    } else if (result === "denied") {
+      toast.error("Notification permission was denied in browser settings.");
     } else {
-      toast.error("Notification permission was denied.");
+      toast.error("Push notifications are not supported or configured on this device.");
     }
   }
 
@@ -261,6 +291,15 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <NotificationsPopover
+              data={data}
+              prevData={prevData}
+              onSelectSubjectForSimulator={(code) => {
+                setSelectedToolSubject(code);
+                setActiveTab("tools");
+              }}
+            />
 
             <ThemeToggle />
 
@@ -427,10 +466,13 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
         </div>
 
         {/* -------------------------------- Tabs -------------------------------- */}
-        <Tabs defaultValue="overview" className="space-y-5">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
           <TabsList className="scrollbar-slim h-11 w-full justify-start overflow-x-auto rounded-xl bg-muted/50 p-1">
             <TabsTrigger value="overview" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <LayoutDashboard className="h-4 w-4" aria-hidden="true" /> Overview
+            </TabsTrigger>
+            <TabsTrigger value="tools" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
+              <Calculator className="h-4 w-4" aria-hidden="true" /> Calculator &amp; Simulator
             </TabsTrigger>
             <TabsTrigger value="trends" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <TrendingUp className="h-4 w-4" aria-hidden="true" /> Trends
@@ -466,10 +508,23 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                     data={data}
                     threshold={threshold}
                     index={i}
+                    onOpenSimulator={(code) => {
+                      setSelectedToolSubject(code);
+                      setActiveTab("tools");
+                    }}
                   />
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* Calculator & What-If Simulator */}
+          <TabsContent value="tools" className="mt-0">
+            <CalculatorSimulatorView
+              data={data}
+              threshold={threshold}
+              initialSelectedSubjectCode={selectedToolSubject}
+            />
           </TabsContent>
 
           {/* Trends */}
@@ -619,11 +674,18 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                       <Switch
                         checked={data.settings.notifyLow}
                         disabled={savingSettings}
-                        onCheckedChange={(v) =>
-                          typeof Notification !== "undefined" && Notification.permission !== "granted" && v
-                            ? enableNotifications()
-                            : updateSettings({ notifyLow: v })
-                        }
+                        onCheckedChange={async (v) => {
+                          if (v) {
+                            if (typeof Notification !== "undefined" && Notification.permission !== "granted") {
+                              await enableNotifications();
+                            } else {
+                              await updateSettings({ notifyLow: true });
+                            }
+                          } else {
+                            await disablePushAlerts();
+                            await updateSettings({ notifyLow: false });
+                          }
+                        }}
                         aria-label="Toggle low-attendance notifications"
                       />
                     </div>
@@ -683,6 +745,17 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* Post-Sync Summary Dialog */}
+        <SyncSummaryDialog
+          summary={syncSummary}
+          open={showSummaryDialog}
+          onOpenChange={setShowSummaryDialog}
+          onOpenSimulator={(code) => {
+            if (code) setSelectedToolSubject(code);
+            setActiveTab("tools");
+          }}
+        />
       </main>
     </div>
   );
