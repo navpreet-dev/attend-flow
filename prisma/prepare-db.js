@@ -50,9 +50,9 @@ console.log('[db-prep] Running prisma generate...');
 try {
   const prismaBin = path.join(rootDir, 'node_modules', 'prisma', 'build', 'index.js');
   if (fs.existsSync(prismaBin)) {
-    execSync(`node "${prismaBin}" generate`, { cwd: rootDir, stdio: 'inherit' });
+    execSync(`node "${prismaBin}" generate`, { cwd: rootDir, stdio: 'inherit', timeout: 20000 });
   } else {
-    execSync('npx prisma generate', { cwd: rootDir, stdio: 'inherit' });
+    execSync('npx prisma generate', { cwd: rootDir, stdio: 'inherit', timeout: 20000 });
   }
 } catch (e) {
   console.error('[db-prep] prisma generate error:', e.message);
@@ -64,9 +64,9 @@ if (process.argv.includes('--push') && isPostgres) {
   try {
     const prismaBin = path.join(rootDir, 'node_modules', 'prisma', 'build', 'index.js');
     if (fs.existsSync(prismaBin)) {
-      execSync(`node "${prismaBin}" db push --accept-data-loss`, { cwd: rootDir, stdio: 'inherit' });
+      execSync(`node "${prismaBin}" db push --accept-data-loss`, { cwd: rootDir, stdio: 'inherit', timeout: 15000 });
     } else {
-      execSync('npx prisma db push --accept-data-loss', { cwd: rootDir, stdio: 'inherit' });
+      execSync('npx prisma db push --accept-data-loss', { cwd: rootDir, stdio: 'inherit', timeout: 15000 });
     }
   } catch (err) {
     console.error('[db-prep] Warning: prisma db push failed:', err.message);

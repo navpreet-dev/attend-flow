@@ -32,6 +32,16 @@ export function clearCachedPayload() {
   }
 }
 
+async function safeJson<T = any>(res: Response): Promise<T | null> {
+  try {
+    const text = await res.text();
+    if (!text || !text.trim()) return null;
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
 export async function apiLogin(
   rollNo: string,
   password: string,
@@ -42,16 +52,22 @@ export async function apiLogin(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rollNo, password, remember }),
   });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error || "Login failed. Please try again.");
+  const json = await safeJson<{ error?: string } & DashboardPayload>(res);
+  if (!res.ok) {
+    if (res.status === 503 || res.status === 504) {
+      throw new Error("College LMS portal is slow or unreachable from server right now. Please try again in a moment.");
+    }
+    throw new Error(json?.error || `Login failed (HTTP ${res.status}). Please try again.`);
+  }
+  if (!json) throw new Error("Empty response from server. Please try again.");
   return json as DashboardPayload;
 }
 
 export async function apiMe(): Promise<DashboardPayload | null> {
   const res = await fetch("/api/me", { cache: "no-store" });
-  const json = await res.json();
+  const json = await safeJson<DashboardPayload>(res);
   if (!json?.authenticated) return null;
-  return json as DashboardPayload;
+  return json;
 }
 
 export class SessionExpiredError extends Error {
@@ -63,11 +79,15 @@ export class SessionExpiredError extends Error {
 
 export async function apiSync(): Promise<DashboardPayload> {
   const res = await fetch("/api/sync", { method: "POST" });
-  const json = await res.json();
+  const json = await safeJson<{ error?: string; authenticated?: boolean } & DashboardPayload>(res);
   if (!res.ok && !json?.authenticated) {
     if (res.status === 401) throw new SessionExpiredError(json?.error || "Please log in again.");
+    if (res.status === 503 || res.status === 504) {
+      throw new Error("College portal timed out. Please try again in a moment.");
+    }
     throw new Error(json?.error || "Sync failed.");
   }
+  if (!json) throw new Error("Empty response from server.");
   return json as DashboardPayload;
 }
 
