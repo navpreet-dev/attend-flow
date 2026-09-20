@@ -90,47 +90,59 @@ export async function POST(req: NextRequest) {
       }
       return NextResponse.json({ error: e.message }, { status: 502 });
     }
+    const errDetail = e instanceof Error ? e.message : "Unexpected error while contacting the college portal.";
+    console.error("[auth/login] Unexpected portal error:", e);
     return NextResponse.json(
-      { error: "Unexpected error while contacting the college portal." },
-      { status: 500 }
+      { error: `Portal error: ${errDetail}` },
+      { status: 502 }
     );
   }
 
   clearFailures(rollNo);
 
   // Upsert the student, persist snapshot, create session.
-  const student = await db.student.upsert({
-    where: { rollNo },
-    create: {
-      rollNo,
-      name: snapshot.profile.name,
-      course: snapshot.profile.course,
-      section: snapshot.profile.section,
-      department: snapshot.profile.department,
-      incharge: snapshot.profile.incharge,
-      rememberMe: remember,
-      ...(remember ? { passwordEnc: encryptSecret(password) } : {}),
-      lastSyncAt: new Date(),
-      lastSyncOk: true,
-    },
-    update: {
-      rememberMe: remember,
-      ...(remember ? { passwordEnc: encryptSecret(password) } : { passwordEnc: null }),
-      lastSyncAt: new Date(),
-      lastSyncOk: true,
-    },
-  });
+  try {
+    const student = await db.student.upsert({
+      where: { rollNo },
+      create: {
+        rollNo,
+        name: snapshot.profile.name,
+        course: snapshot.profile.course,
+        section: snapshot.profile.section,
+        department: snapshot.profile.department,
+        incharge: snapshot.profile.incharge,
+        rememberMe: remember,
+        ...(remember ? { passwordEnc: encryptSecret(password) } : {}),
+        lastSyncAt: new Date(),
+        lastSyncOk: true,
+      },
+      update: {
+        rememberMe: remember,
+        ...(remember ? { passwordEnc: encryptSecret(password) } : { passwordEnc: null }),
+        lastSyncAt: new Date(),
+        lastSyncOk: true,
+      },
+    });
 
-  await persistSnapshot(student.id, snapshot, { remember });
-  await db.syncEvent.create({
-    data: {
-      studentId: student.id,
-      status: "SUCCESS",
-      message: `Login sync — ${snapshot.subjects.length} subjects`,
-    },
-  });
+    await persistSnapshot(student.id, snapshot, { remember });
+    await db.syncEvent.create({
+      data: {
+        studentId: student.id,
+        status: "SUCCESS",
+        message: `Login sync — ${snapshot.subjects.length} subjects`,
+      },
+    });
 
-  await createSession(student.id, remember);
-  const payload = await getDashboardData(student.id);
-  return NextResponse.json(payload);
+    await createSession(student.id, remember);
+    const payload = await getDashboardData(student.id);
+    return NextResponse.json(payload);
+  } catch (dbErr) {
+    console.error("[auth/login] Database or session error:", dbErr);
+    const msg = dbErr instanceof Error ? dbErr.message : "Database error";
+    return NextResponse.json(
+      { error: `Database error: ${msg}. Please ensure your database is accessible.` },
+      { status: 500 }
+    );
+  }
 }
+

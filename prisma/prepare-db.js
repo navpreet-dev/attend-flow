@@ -58,17 +58,18 @@ try {
   console.error('[db-prep] prisma generate error:', e.message);
 }
 
-// If --push flag passed and postgres is used, sync schema to database
-if (process.argv.includes('--push') && isPostgres) {
-  console.log('[db-prep] Syncing schema with database (prisma db push)...');
+// If postgres is used or --push flag passed, sync schema with database
+if (isPostgres || process.argv.includes('--push')) {
+  console.log(`[db-prep] Syncing schema with database (prisma db push) for provider: ${targetProvider}...`);
   try {
     const prismaBin = path.join(rootDir, 'node_modules', 'prisma', 'build', 'index.js');
     if (fs.existsSync(prismaBin)) {
-      execSync(`node "${prismaBin}" db push --accept-data-loss`, { cwd: rootDir, stdio: 'inherit', timeout: 15000 });
+      execSync(`node "${prismaBin}" db push --accept-data-loss`, { cwd: rootDir, stdio: 'inherit', timeout: 30000 });
     } else {
-      execSync('npx prisma db push --accept-data-loss', { cwd: rootDir, stdio: 'inherit', timeout: 15000 });
+      execSync('npx prisma db push --accept-data-loss', { cwd: rootDir, stdio: 'inherit', timeout: 30000 });
     }
+    console.log('[db-prep] Database schema synced successfully.');
   } catch (err) {
-    console.error('[db-prep] Warning: prisma db push failed:', err.message);
+    console.error('[db-prep] Warning: prisma db push encountered an issue:', err.message);
   }
 }
