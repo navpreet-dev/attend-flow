@@ -67,9 +67,9 @@ console.log('[db-prep] Running prisma generate...');
 try {
   const prismaBin = path.join(rootDir, 'node_modules', 'prisma', 'build', 'index.js');
   if (fs.existsSync(prismaBin)) {
-    execSync(`node "${prismaBin}" generate`, { cwd: rootDir, stdio: 'inherit', timeout: 20000 });
+    execSync(`node "${prismaBin}" generate`, { cwd: rootDir, stdio: 'inherit', timeout: 60000 });
   } else {
-    execSync('npx prisma generate', { cwd: rootDir, stdio: 'inherit', timeout: 20000 });
+    execSync('npx prisma generate', { cwd: rootDir, stdio: 'inherit', timeout: 60000 });
   }
 } catch (e) {
   console.error('[db-prep] prisma generate error:', e.message);
