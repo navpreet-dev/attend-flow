@@ -32,6 +32,8 @@ const targetProvider = isPostgres ? 'postgresql' : 'sqlite';
 
 console.log(`[db-prep] Detected database provider: ${targetProvider} (isPostgres: ${isPostgres})`);
 
+const directUrl = process.env.DIRECT_URL || '';
+
 let schema = fs.readFileSync(schemaPath, 'utf8');
 const currentProviderMatch = schema.match(/datasource\s+db\s*\{[\s\S]*?provider\s*=\s*"([^"]+)"/);
 const currentProvider = currentProviderMatch ? currentProviderMatch[1] : null;
@@ -42,8 +44,23 @@ if (currentProvider !== targetProvider) {
     /(datasource\s+db\s*\{[\s\S]*?provider\s*=\s*")[^"]+(")/,
     `$1${targetProvider}$2`
   );
-  fs.writeFileSync(schemaPath, schema, 'utf8');
 }
+
+if (isPostgres && directUrl) {
+  if (!schema.includes('directUrl')) {
+    schema = schema.replace(
+      /(url\s*=\s*env\("DATABASE_URL"\))/,
+      `$1\n  directUrl = env("DIRECT_URL")`
+    );
+  }
+} else {
+  if (schema.includes('directUrl')) {
+    schema = schema.replace(/\n\s*directUrl\s*=\s*env\("DIRECT_URL"\)/g, '');
+  }
+}
+
+fs.writeFileSync(schemaPath, schema, 'utf8');
+
 
 // Generate Prisma Client
 console.log('[db-prep] Running prisma generate...');
