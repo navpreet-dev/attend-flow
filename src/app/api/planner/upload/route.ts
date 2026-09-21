@@ -249,6 +249,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // If Gemini is not configured and user uploaded an image on Vercel
+      if (!geminiActive && (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) {
+        if (process.env.VERCEL) {
+          return NextResponse.json(
+            {
+              error:
+                "Gemini AI is not yet configured on this deployment. Please add GEMINI_API_KEY in your Vercel Project Settings (Settings -> Environment Variables -> GEMINI_API_KEY), or upload your timetable in PDF format.",
+            },
+            { status: 422 }
+          );
+        }
+      }
+
       // Offline / Fallback Extraction using Local Tesseract + Regex Parser
       const extracted = await extractDocumentContent(buffer, file.name, file.type);
       if (!extracted.rawText || extracted.rawText.trim().length < 5) {
@@ -371,6 +384,19 @@ export async function POST(req: NextRequest) {
           console.warn(
             "[api/planner/upload] Gemini AI calendar extraction failed, falling back to local OCR:",
             aiErr
+          );
+        }
+      }
+
+      // If Gemini is not configured and user uploaded an image on Vercel
+      if (!geminiActive && (file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name))) {
+        if (process.env.VERCEL) {
+          return NextResponse.json(
+            {
+              error:
+                "Gemini AI is not yet configured on this deployment. Please add GEMINI_API_KEY in your Vercel Project Settings (Settings -> Environment Variables -> GEMINI_API_KEY), or upload your calendar in PDF format.",
+            },
+            { status: 422 }
           );
         }
       }

@@ -6,7 +6,10 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  serverExternalPackages: ["web-push"],
+  serverExternalPackages: ["web-push", "sharp"],
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./public/tessdata/**/*"],
+  },
   async headers() {
     return [
       {

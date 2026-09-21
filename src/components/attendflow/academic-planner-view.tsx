@@ -237,16 +237,16 @@ export function AcademicPlannerView({
         setUploadStepMessage("Matching classes with AGC courses...");
       }, 3200);
 
-      // Client watchdog timeout of 25 seconds to prevent any infinite spinner
+      // Client watchdog timeout of 35 seconds to prevent any infinite spinner
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
           () =>
             reject(
               new Error(
-                "Document processing took too long. Please ensure you have a stable network or upload a PDF format."
+                "Document processing took longer than expected. Please ensure you have a stable network, check GEMINI_API_KEY in Vercel Environment Variables, or upload in PDF format."
               )
             ),
-          25000
+          35000
         )
       );
 
@@ -299,10 +299,10 @@ export function AcademicPlannerView({
           () =>
             reject(
               new Error(
-                "Calendar processing took too long. Please ensure you have a stable network or upload a PDF format."
+                "Calendar processing took longer than expected. Please ensure you have a stable network, check GEMINI_API_KEY in Vercel Environment Variables, or upload in PDF format."
               )
             ),
-          20000
+          30000
         )
       );
 
