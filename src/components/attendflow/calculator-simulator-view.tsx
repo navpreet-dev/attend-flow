@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import { formatTime12Hour } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -710,7 +711,7 @@ export function CalculatorSimulatorView({
                         <div className="rounded-lg bg-background/80 border border-border/60 px-3 py-2 text-xs flex items-center justify-between text-muted-foreground">
                           <span className="flex items-center gap-1.5">
                             <Clock className="h-3.5 w-3.5 text-primary" />
-                            <span>Next class: <strong className="text-foreground">{timetableMetrics.nextClass.date} ({timetableMetrics.nextClass.startTime}–{timetableMetrics.nextClass.endTime})</strong></span>
+                            <span>Next class: <strong className="text-foreground">{timetableMetrics.nextClass.date} ({formatTime12Hour(timetableMetrics.nextClass.startTime)}–{formatTime12Hour(timetableMetrics.nextClass.endTime)})</strong></span>
                           </span>
                           {timetableMetrics.nextClass.room && (
                             <span className="text-[11px] font-medium">{timetableMetrics.nextClass.room}</span>

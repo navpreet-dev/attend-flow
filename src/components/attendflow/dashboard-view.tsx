@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { formatTime12Hour } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -574,7 +575,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                               {c.subjectName}
                             </span>
                             <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] shrink-0">
-                              {c.startTime}
+                              {formatTime12Hour(c.startTime)}
                             </span>
                           </div>
                         ))}
@@ -593,7 +594,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                               {c.subjectName}
                             </span>
                             <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] shrink-0">
-                              {c.startTime}
+                              {formatTime12Hour(c.startTime)}
                             </span>
                           </div>
                         ))}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { formatTime12Hour } from "@/lib/utils";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -833,7 +834,7 @@ export function AcademicPlannerView({
                       </Badge>
                     )}
                     <span className="font-mono text-muted-foreground">
-                      {entry.startTime} – {entry.endTime}
+                      {formatTime12Hour(entry.startTime)} – {formatTime12Hour(entry.endTime)}
                     </span>
                   </div>
 
