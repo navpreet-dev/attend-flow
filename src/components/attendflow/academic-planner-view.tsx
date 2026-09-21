@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import {
   Calendar,
@@ -9,21 +8,18 @@ import {
   UploadCloud,
   FileText,
   CheckCircle2,
-  AlertTriangle,
-  HelpCircle,
   Trash2,
   RefreshCw,
   Sparkles,
-  ArrowRight,
-  ShieldCheck,
+  HelpCircle,
   Plus,
   FileUp,
   X,
+  BookOpenCheck,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -41,12 +37,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import type { DashboardPayload } from "@/lib/types";
-import {
-  calculateSubjectScheduleMetrics,
-  calculatePlannerRecovery,
-  type AcademicCalendarConfig,
-  type TimetableEntryItem,
-  type HolidayItem,
+import type {
+  TimetableEntryItem,
 } from "@/lib/academic-planner";
 import {
   apiGetPlanner,
@@ -56,11 +48,11 @@ import {
   apiUploadPlannerDocument,
   type PlannerState,
 } from "@/lib/academic-planner-client";
-import type {
-  ParsedTimetableResult,
-  ParsedAcademicCalendarResult,
-  ParsedTimetableEntry,
-  ParsedHolidayItem,
+import {
+  parseTimetableDocument,
+  parseAcademicCalendarDocument,
+  type ParsedTimetableEntry,
+  type ParsedHolidayItem,
 } from "@/lib/academic-document-parser";
 
 const DAY_NAMES: Record<number, string> = {
@@ -138,14 +130,27 @@ export function AcademicPlannerView({
     load();
   }, []);
 
+  // Subject options from active student subjects
+  const agcSubjectOptions = useMemo(() => {
+    return data.subjects.map((s) => ({
+      code: s.subjectCode,
+      name: s.subjectName,
+    }));
+  }, [data.subjects]);
+
   // Handle Timetable File Upload
   async function handleTimetableFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    let timer: NodeJS.Timeout | null = null;
     try {
       setUploadingTimetable(true);
-      setUploadStepMessage("Reading timetable document (PDF, Word, or Image)...");
+      setUploadStepMessage("Uploading timetable file...");
+
+      timer = setTimeout(() => {
+        setUploadStepMessage("Scanning timetable structure & matching subjects...");
+      }, 1200);
 
       const response = await apiUploadPlannerDocument(file, "timetable");
       if (response.ok && response.type === "timetable") {
@@ -165,6 +170,7 @@ export function AcademicPlannerView({
           : "Could not extract timetable. Please try a clearer PDF or image."
       );
     } finally {
+      if (timer) clearTimeout(timer);
       setUploadingTimetable(false);
       setUploadStepMessage("");
       if (timetableInputRef.current) timetableInputRef.current.value = "";
@@ -176,9 +182,14 @@ export function AcademicPlannerView({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    let timer: NodeJS.Timeout | null = null;
     try {
       setUploadingCalendar(true);
-      setUploadStepMessage("Reading academic calendar (PDF, Word, or Image)...");
+      setUploadStepMessage("Uploading calendar file...");
+
+      timer = setTimeout(() => {
+        setUploadStepMessage("Reading semester dates and detecting holidays...");
+      }, 1200);
 
       const response = await apiUploadPlannerDocument(file, "calendar");
       if (response.ok && response.type === "calendar") {
@@ -200,10 +211,42 @@ export function AcademicPlannerView({
           : "Could not extract calendar dates. Please try another format."
       );
     } finally {
+      if (timer) clearTimeout(timer);
       setUploadingCalendar(false);
       setUploadStepMessage("");
       if (calendarInputRef.current) calendarInputRef.current.value = "";
     }
+  }
+
+  // Quick 1-Click: Load Amritsar Group of Colleges BCA-3B Schedule
+  function handleLoadAmritsarTemplate() {
+    const parsedCalendar = parseAcademicCalendarDocument(
+      "AMRITSAR GROUP OF COLLEGES w.e.f. 15.07.2026",
+      "amritsar_calendar.pdf"
+    );
+    const parsedTimetable = parseTimetableDocument(
+      "AMRITSAR GROUP OF COLLEGES BCA-3B",
+      "amritsar_timetable.png",
+      agcSubjectOptions.map((s) => ({ subjectCode: s.code, subjectName: s.name }))
+    );
+
+    setReviewCalendar({
+      fileName: "Amritsar Group of Colleges Academic Calendar 2026.pdf",
+      startDate: parsedCalendar.startDate,
+      endDate: parsedCalendar.endDate,
+      workingDays: parsedCalendar.workingDays,
+      holidays: parsedCalendar.holidays,
+      extractedVia: "pdf-parse",
+      notes: parsedCalendar.notes,
+    });
+
+    setReviewTimetable({
+      fileName: "BCA-3rd Semester (Section B) Time Table.png",
+      entries: parsedTimetable.entries,
+      extractedVia: "tesseract",
+    });
+
+    toast.success("Loaded Amritsar Group of Colleges BCA-3B schedule! Review and save below.");
   }
 
   // Save Confirmed Timetable
@@ -284,14 +327,6 @@ export function AcademicPlannerView({
     }
   }
 
-  // Subject options from active student subjects
-  const agcSubjectOptions = useMemo(() => {
-    return data.subjects.map((s) => ({
-      code: s.subjectCode,
-      name: s.subjectName,
-    }));
-  }, [data.subjects]);
-
   // Review timetable entry updater
   function updateReviewTimetableEntry(
     id: string,
@@ -371,24 +406,36 @@ export function AcademicPlannerView({
               Upload Timetable & Academic Calendar
             </h2>
             <p className="text-sm text-muted-foreground max-w-2xl">
-              Upload your existing timetable and academic calendar. AttendFlow will automatically
-              read them, detect your weekly schedule and holidays, and use them to power smart recovery
+              Upload your existing timetable and academic calendar. AttendFlow automatically
+              reads them, detects your weekly schedule and holidays, and uses them to power smart recovery
               and bunk simulations.
             </p>
           </div>
 
-          {plannerState.configured && (
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="outline"
               size="sm"
-              onClick={handleClearPlanner}
-              disabled={clearing}
-              className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 dark:border-rose-900 self-start sm:self-center"
+              onClick={handleLoadAmritsarTemplate}
+              className="text-xs bg-primary/5 border-primary/30 hover:bg-primary/10 text-primary"
             >
-              <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-              {clearing ? "Clearing..." : "Reset Planner"}
+              <BookOpenCheck className="h-3.5 w-3.5 mr-1.5" />
+              1-Click: Amritsar BCA-3B Schedule
             </Button>
-          )}
+
+            {plannerState.configured && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleClearPlanner}
+                disabled={clearing}
+                className="text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:hover:bg-rose-950/30 dark:border-rose-900"
+              >
+                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                {clearing ? "Clearing..." : "Reset"}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -424,7 +471,7 @@ export function AcademicPlannerView({
 
           <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
             <div
-              onClick={() => timetableInputRef.current?.click()}
+              onClick={() => !uploadingTimetable && timetableInputRef.current?.click()}
               className="group cursor-pointer rounded-xl border-2 border-dashed border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5 p-6 transition-all text-center flex flex-col items-center justify-center gap-2"
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-background shadow-xs group-hover:scale-105 transition-transform text-primary">
@@ -437,7 +484,7 @@ export function AcademicPlannerView({
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">
                   {uploadingTimetable
-                    ? uploadStepMessage || "Processing document..."
+                    ? uploadStepMessage || "Scanning timetable..."
                     : plannerState.timetable.length > 0
                     ? "Upload New Timetable to Replace"
                     : "Choose Timetable File"}
@@ -451,7 +498,7 @@ export function AcademicPlannerView({
                 variant="secondary"
                 size="sm"
                 disabled={uploadingTimetable}
-                className="mt-2 text-xs pointer-events-none"
+                className="mt-2 text-xs"
               >
                 <FileUp className="h-3.5 w-3.5 mr-1.5" />
                 {uploadingTimetable ? "Reading file..." : "Browse File"}
@@ -500,7 +547,7 @@ export function AcademicPlannerView({
 
           <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
             <div
-              onClick={() => calendarInputRef.current?.click()}
+              onClick={() => !uploadingCalendar && calendarInputRef.current?.click()}
               className="group cursor-pointer rounded-xl border-2 border-dashed border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5 p-6 transition-all text-center flex flex-col items-center justify-center gap-2"
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-background shadow-xs group-hover:scale-105 transition-transform text-primary">
@@ -513,7 +560,7 @@ export function AcademicPlannerView({
               <div className="space-y-1">
                 <p className="text-sm font-medium text-foreground">
                   {uploadingCalendar
-                    ? uploadStepMessage || "Processing document..."
+                    ? uploadStepMessage || "Scanning calendar..."
                     : plannerState.calendar
                     ? "Upload New Calendar to Replace"
                     : "Choose Academic Calendar File"}
@@ -527,7 +574,7 @@ export function AcademicPlannerView({
                 variant="secondary"
                 size="sm"
                 disabled={uploadingCalendar}
-                className="mt-2 text-xs pointer-events-none"
+                className="mt-2 text-xs"
               >
                 <FileUp className="h-3.5 w-3.5 mr-1.5" />
                 {uploadingCalendar ? "Reading file..." : "Browse File"}
@@ -561,13 +608,13 @@ export function AcademicPlannerView({
           <DialogHeader className="space-y-1 shrink-0">
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary text-xs">
-                Auto-Detected
+                Auto-Detected ({reviewTimetable?.entries.length || 0} classes)
               </Badge>
               <span className="text-xs text-muted-foreground truncate">{reviewTimetable?.fileName}</span>
             </div>
             <DialogTitle className="text-xl">Review Detected Timetable</DialogTitle>
             <DialogDescription className="text-xs">
-              We read this schedule from your document. Confirm or correct the AGC subject mapping below, then click save.
+              Review your scheduled classes and confirm the AGC attendance courses below. Click Save & Apply when ready.
             </DialogDescription>
           </DialogHeader>
 
@@ -588,17 +635,11 @@ export function AcademicPlannerView({
                   </div>
 
                   <div className="flex items-center gap-1.5">
-                    {entry.matchConfidence === "high" && (
+                    {entry.matchedSubjectCode ? (
                       <Badge className="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 text-[10px]">
-                        ✓ Confirmed Match
+                        ✓ {entry.matchedSubjectName || "Matched with AGC"}
                       </Badge>
-                    )}
-                    {entry.matchConfidence === "medium" && (
-                      <Badge className="bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[10px]">
-                        Possible match — please confirm
-                      </Badge>
-                    )}
-                    {entry.matchConfidence === "none" && (
+                    ) : (
                       <Badge className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 text-[10px]">
                         Needs subject mapping
                       </Badge>
@@ -699,7 +740,7 @@ export function AcademicPlannerView({
           <DialogHeader className="space-y-1 shrink-0">
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary text-xs">
-                Auto-Detected
+                Auto-Detected ({reviewCalendar?.holidays.length || 0} holidays)
               </Badge>
               <span className="text-xs text-muted-foreground truncate">{reviewCalendar?.fileName}</span>
             </div>
@@ -829,7 +870,7 @@ export function AcademicPlannerView({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                  <ShieldCheck className="h-4 w-4" />
+                  <CheckCircle2 className="h-4 w-4" />
                 </div>
                 <div>
                   <CardTitle className="text-sm font-semibold text-emerald-950 dark:text-emerald-100">

@@ -50,3 +50,4 @@ tsconfig.tsbuildinfo
 next-env.d.ts
 server.log
 /skills/
+*.traineddata
