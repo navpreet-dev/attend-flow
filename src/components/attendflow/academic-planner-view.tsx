@@ -143,54 +143,75 @@ export function AcademicPlannerView({
   }, [data.subjects]);
 
   /**
-   * Compresses image files client-side before upload.
-   * Drastically speeds up mobile uploads (<200ms) and prevents Vercel serverless payload limit errors.
+   * Compresses image files client-side before upload with zero-copy URL.createObjectURL.
+   * Enforces a strict 1.5s race timeout so mobile devices NEVER get stuck.
    */
   async function compressImageIfApplicable(file: File): Promise<File> {
-    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name);
-    if (!isImage) return file;
+    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(file.name);
+    if (!isImage || typeof window === "undefined" || !window.URL?.createObjectURL) {
+      return file;
+    }
 
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
+    const compressPromise = new Promise<File>((resolve) => {
+      try {
+        const objectUrl = URL.createObjectURL(file);
         const img = new Image();
         img.onload = () => {
-          const MAX_DIM = 1600;
-          let { width, height } = img;
-          if (width > MAX_DIM || height > MAX_DIM) {
-            if (width > height) {
-              height = Math.round((height * MAX_DIM) / width);
-              width = MAX_DIM;
-            } else {
-              width = Math.round((width * MAX_DIM) / height);
-              height = MAX_DIM;
+          URL.revokeObjectURL(objectUrl);
+          try {
+            const MAX_DIM = 1400;
+            let { width, height } = img;
+            if (width > MAX_DIM || height > MAX_DIM) {
+              if (width > height) {
+                height = Math.round((height * MAX_DIM) / width);
+                width = MAX_DIM;
+              } else {
+                width = Math.round((width * MAX_DIM) / height);
+                height = MAX_DIM;
+              }
             }
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return resolve(file);
+            ctx.drawImage(img, 0, 0, width, height);
+
+            if (canvas.toBlob) {
+              canvas.toBlob(
+                (blob) => {
+                  if (!blob) return resolve(file);
+                  const compressed = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+                    type: "image/jpeg",
+                    lastModified: Date.now(),
+                  });
+                  resolve(compressed);
+                },
+                "image/jpeg",
+                0.82
+              );
+            } else {
+              resolve(file);
+            }
+          } catch {
+            resolve(file);
           }
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) return resolve(file);
-          ctx.drawImage(img, 0, 0, width, height);
-          canvas.toBlob(
-            (blob) => {
-              if (!blob) return resolve(file);
-              const compressed = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
-                type: "image/jpeg",
-                lastModified: Date.now(),
-              });
-              resolve(compressed);
-            },
-            "image/jpeg",
-            0.85
-          );
         };
-        img.onerror = () => resolve(file);
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = () => resolve(file);
-      reader.readAsDataURL(file);
+        img.onerror = () => {
+          URL.revokeObjectURL(objectUrl);
+          resolve(file);
+        };
+        img.src = objectUrl;
+      } catch {
+        resolve(file);
+      }
     });
+
+    const timeoutPromise = new Promise<File>((resolve) => {
+      setTimeout(() => resolve(file), 1500);
+    });
+
+    return Promise.race([compressPromise, timeoutPromise]);
   }
 
   // Handle Timetable File Processing (from file input or drag-and-drop)
@@ -206,7 +227,24 @@ export function AcademicPlannerView({
         setUploadStepMessage("Scanning timetable structure & matching subjects...");
       }, 900);
 
-      const response = await apiUploadPlannerDocument(file, "timetable");
+      // Client watchdog timeout of 20 seconds to prevent any infinite spinner
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Document processing took too long. Please ensure you have a stable network or upload a PDF format."
+              )
+            ),
+          20000
+        )
+      );
+
+      const response = await Promise.race([
+        apiUploadPlannerDocument(file, "timetable"),
+        timeoutPromise,
+      ]);
+
       if (response.ok && response.type === "timetable") {
         setReviewTimetable({
           fileName: rawFile.name,
@@ -244,7 +282,23 @@ export function AcademicPlannerView({
         setUploadStepMessage("Reading semester dates and detecting holidays...");
       }, 900);
 
-      const response = await apiUploadPlannerDocument(file, "calendar");
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Calendar processing took too long. Please ensure you have a stable network or upload a PDF format."
+              )
+            ),
+          20000
+        )
+      );
+
+      const response = await Promise.race([
+        apiUploadPlannerDocument(file, "calendar"),
+        timeoutPromise,
+      ]);
+
       if (response.ok && response.type === "calendar") {
         setReviewCalendar({
           fileName: rawFile.name,
@@ -445,14 +499,14 @@ export function AcademicPlannerView({
       <input
         ref={timetableInputRef}
         type="file"
-        accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
+        accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
         className="hidden"
         onChange={handleTimetableFileSelect}
       />
       <input
         ref={calendarInputRef}
         type="file"
-        accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
+        accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,image/*"
         className="hidden"
         onChange={handleCalendarFileSelect}
       />

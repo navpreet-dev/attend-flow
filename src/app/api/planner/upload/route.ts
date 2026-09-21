@@ -4,6 +4,9 @@ import { getSessionStudent } from "@/lib/session";
 import { extractDocumentContent, validateUploadedFile } from "@/lib/academic-document-extractor";
 import { parseTimetableDocument, parseAcademicCalendarDocument } from "@/lib/academic-document-parser";
 
+// Allow up to 30 seconds for serverless OCR extraction
+export const maxDuration = 30;
+
 export async function POST(req: NextRequest) {
   const student = await getSessionStudent();
   if (!student) {

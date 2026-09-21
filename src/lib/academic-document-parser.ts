@@ -296,9 +296,10 @@ function parseAmritsarBcaTimetable(
  * Rejects random/unrelated documents (invoices, resumes, essays, cat photos, etc.).
  */
 export function validateIsTimetable(
-  rawText: string,
+  input: string | { rawText: string },
   availableSubjects: { subjectCode: string; subjectName: string }[] = []
 ): { valid: boolean; error?: string } {
+  const rawText = typeof input === "string" ? input : input?.rawText || "";
   if (!rawText || rawText.trim().length < 10) {
     return {
       valid: false,
@@ -308,64 +309,85 @@ export function validateIsTimetable(
 
   const lower = rawText.toLowerCase();
 
-  // 1. Days of the week
-  const dayKeywords = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "mon", "tue", "wed", "thu", "fri", "sat"];
-  const matchedDays = dayKeywords.filter((d) => new RegExp(`\\b${d}\\b`, "i").test(lower));
+  // 1. Check for day of the week presence
+  const daysFound = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+  ].filter((day) => new RegExp(`\\b${day}\\b`, "i").test(lower));
 
-  // 2. Timetable / class keywords
+  // 2. Check for timetable-specific keywords
   const timetableKeywords = [
-    "time table",
     "timetable",
-    "class wise",
+    "time table",
     "schedule",
-    "lecture",
-    "lectures",
     "period",
-    "periods",
+    "lecture",
     "slot",
-    "timing",
-    "timings",
-    "break",
+    "recess",
     "lunch",
-    "teacher",
-    "faculty",
+    "break",
+    "room",
+    "lab",
     "sec-",
     "section",
+    "class",
     "semester",
+    "dept",
     "department",
+    "batch",
   ];
-  const matchedKeywords = timetableKeywords.filter((kw) => lower.includes(kw));
+  const keywordsFound = timetableKeywords.filter((kw) => lower.includes(kw));
 
-  // 3. Time range patterns (e.g. 9:00-9:50, 10:00 to 11:00, 09:30 - 10:30, 1:10 - 2:00)
-  const hasTimePattern =
-    /\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?\b/i.test(
-      rawText
-    );
+  // 3. Check for time slot patterns (e.g. 9:00, 10:40, 01:20, 9-10)
+  const timePattern = /\b([0-1]?[0-9]|2[0-3]):[0-5][0-9]\b/g;
+  const timeMatches = rawText.match(timePattern) || [];
 
-  // 4. Any matched subject from the student's enrolled list (any department/course)
-  const hasSubjectMatch = availableSubjects.some((s) => {
-    const sName = s.subjectName.toLowerCase();
-    const sCode = s.subjectCode.toLowerCase();
-    return (
-      (sName.length > 3 && lower.includes(sName)) ||
-      (sCode.length > 3 && lower.includes(sCode))
-    );
-  });
+  // 4. Check if student's enrolled subjects appear in text
+  const subjectMatches = availableSubjects.filter(
+    (subj) =>
+      lower.includes(subj.subjectCode.toLowerCase()) ||
+      lower.includes(subj.subjectName.toLowerCase())
+  );
 
-  // Valid timetable must have either:
-  // - Days of week + (timetable keywords OR time ranges OR subjects)
-  // - OR time ranges + (timetable keywords OR subjects)
-  // - OR multiple days of week (>= 2)
-  const isTimetable =
-    (matchedDays.length >= 1 && (matchedKeywords.length >= 1 || hasTimePattern || hasSubjectMatch)) ||
-    (hasTimePattern && (matchedKeywords.length >= 1 || hasSubjectMatch)) ||
-    matchedDays.length >= 2;
+  // Score calculation
+  let score = 0;
+  if (lower.includes("time table") || lower.includes("timetable")) score += 4;
+  if (daysFound.length >= 1) score += 2;
+  if (daysFound.length >= 2) score += 2;
+  if (daysFound.length >= 4) score += 2;
+  if (timeMatches.length >= 2) score += 3;
+  if (timeMatches.length >= 6) score += 2;
+  if (keywordsFound.length >= 2) score += 2;
+  if (keywordsFound.length >= 4) score += 2;
+  if (subjectMatches.length >= 1) score += 3;
 
-  if (!isTimetable) {
+  const hasExplicitTimetableTitle =
+    lower.includes("time table") ||
+    lower.includes("timetable") ||
+    lower.includes("class schedule") ||
+    lower.includes("lecture schedule");
+
+  const isValid =
+    hasExplicitTimetableTitle ||
+    score >= 4 ||
+    (daysFound.length >= 2 && (timeMatches.length >= 1 || keywordsFound.length >= 1)) ||
+    (timeMatches.length >= 2 && keywordsFound.length >= 1);
+
+  if (!isValid) {
     return {
       valid: false,
       error:
-        "This file does not appear to be a class timetable. We could not detect days of the week, lecture time slots, or class subjects. Please upload an official weekly class schedule.",
+        "The uploaded file does not appear to be a weekly timetable. AttendFlow looked for days of the week (Monday-Saturday), class time slots (e.g. 09:00 - 09:50), and subject codes, but couldn't find them. Please upload an official timetable schedule.",
     };
   }
 
@@ -376,7 +398,10 @@ export function validateIsTimetable(
  * Validate that a document text contains academic calendar indicators.
  * Rejects non-calendar documents.
  */
-export function validateIsAcademicCalendar(rawText: string): { valid: boolean; error?: string } {
+export function validateIsAcademicCalendar(
+  input: string | { rawText: string }
+): { valid: boolean; error?: string } {
+  const rawText = typeof input === "string" ? input : input?.rawText || "";
   if (!rawText || rawText.trim().length < 10) {
     return {
       valid: false,
@@ -451,10 +476,16 @@ export function validateIsAcademicCalendar(rawText: string): { valid: boolean; e
  * Parse Timetable Text into Structured Entries
  */
 export function parseTimetableDocument(
-  rawText: string,
-  fileName: string,
+  input: string | { rawText: string; fileName?: string },
+  fileNameParam?: string,
   agcSubjects: { subjectCode: string; subjectName: string }[] = []
 ): ParsedTimetableResult {
+  const rawText = typeof input === "string" ? input : input?.rawText || "";
+  const fileName =
+    typeof input === "string"
+      ? fileNameParam || "timetable"
+      : input?.fileName || fileNameParam || "timetable";
+
   // Validate that document is actually a timetable
   const validation = validateIsTimetable(rawText, agcSubjects);
   if (!validation.valid) {
@@ -621,9 +652,15 @@ function parseDateSnippet(text: string, currentYear: number = new Date().getFull
  * Parse Academic Calendar Text into Dates and Holidays
  */
 export function parseAcademicCalendarDocument(
-  rawText: string,
-  fileName: string
+  input: string | { rawText: string; fileName?: string },
+  fileNameParam?: string
 ): ParsedAcademicCalendarResult {
+  const rawText = typeof input === "string" ? input : input?.rawText || "";
+  const fileName =
+    typeof input === "string"
+      ? fileNameParam || "calendar"
+      : input?.fileName || fileNameParam || "calendar";
+
   // Validate that document is actually an academic calendar
   const validation = validateIsAcademicCalendar(rawText);
   if (!validation.valid) {
