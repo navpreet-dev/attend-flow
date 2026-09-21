@@ -24,6 +24,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   Calculator,
+  Calendar,
   CheckCircle2,
   HelpCircle,
   Info,
@@ -37,10 +38,18 @@ import {
 } from "lucide-react";
 import type { DashboardPayload, SubjectInfo } from "@/lib/types";
 import { overallStats } from "@/lib/af-client";
-import { calculateRecovery, simulateAttendance } from "@/lib/attendance-calculator";
+import {
+  calculateRecovery,
+  simulateAttendance,
+  calculateRecoveryDate,
+  simulateSemesterProjection,
+} from "@/lib/attendance-calculator";
 import { Clock } from "lucide-react";
 import type { PlannerState } from "@/lib/academic-planner-client";
-import { calculateSubjectScheduleMetrics } from "@/lib/academic-planner";
+import {
+  calculateSubjectScheduleMetrics,
+  generateScheduledClasses,
+} from "@/lib/academic-planner";
 
 interface CalculatorSimulatorViewProps {
   data: DashboardPayload;
@@ -178,6 +187,44 @@ export function CalculatorSimulatorView({
       remainingNum
     );
   }, [currentSubjectInfo, targetPercentage, remainingNum]);
+
+  // Upcoming class instances for currently selected subject
+  const upcomingClassesForSubject = useMemo(() => {
+    if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
+      return [];
+    }
+    if (selectedSubjectCode === "OVERALL" || selectedSubjectCode === "CUSTOM") {
+      return [];
+    }
+    const allInstances = generateScheduledClasses(plannerState.calendar, plannerState.timetable);
+    return allInstances.filter(
+      (inst) =>
+        (inst.matchedSubjectCode === selectedSubjectCode || inst.subjectCode === selectedSubjectCode) &&
+        !inst.isPassed
+    );
+  }, [plannerState, selectedSubjectCode]);
+
+  // Calendar Recovery Date prediction
+  const recoveryDatePrediction = useMemo(() => {
+    if (!upcomingClassesForSubject || upcomingClassesForSubject.length === 0) {
+      return null;
+    }
+    return calculateRecoveryDate(recovery.classesNeeded, upcomingClassesForSubject);
+  }, [recovery.classesNeeded, upcomingClassesForSubject]);
+
+  // Semester End Projection
+  const semesterProjection = useMemo(() => {
+    if (!timetableMetrics || timetableMetrics.scheduledRemaining <= 0) {
+      return null;
+    }
+    return simulateSemesterProjection(
+      currentSubjectInfo.attended,
+      currentSubjectInfo.total,
+      timetableMetrics.scheduledRemaining,
+      bunkMore,
+      targetPercentage
+    );
+  }, [timetableMetrics, currentSubjectInfo.attended, currentSubjectInfo.total, bunkMore, targetPercentage]);
 
   return (
     <div className="space-y-6">
@@ -613,6 +660,65 @@ export function CalculatorSimulatorView({
                       </div>
                     </div>
                   </div>
+
+                  {/* Calendar & Timetable Semester-End Outlook */}
+                  {semesterProjection && (
+                    <div className="rounded-2xl border border-border/80 bg-gradient-to-br from-muted/30 to-muted/10 p-4 space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          <span className="text-xs font-semibold uppercase tracking-wider text-foreground">
+                            Semester-End Attendance Outlook
+                          </span>
+                        </div>
+                        <Badge variant="outline" className="text-[11px] border-border/80">
+                          {semesterProjection.scheduledRemaining} classes left in semester
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-center">
+                        <div className="p-3 rounded-xl bg-background border border-border/60 shadow-2xs">
+                          <p className="text-[10px] uppercase text-muted-foreground font-semibold">Semester Safe Bunks</p>
+                          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                            {semesterProjection.safeBunksTotal}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">can skip before semester end</p>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-background border border-border/60 shadow-2xs">
+                          <p className="text-[10px] uppercase text-muted-foreground font-semibold">Simulated Final %</p>
+                          <p className={`text-xl font-bold ${semesterProjection.isAboveTarget ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {semesterProjection.projectedPercentage.toFixed(1)}%
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">with {bunkMore} bunk{bunkMore === 1 ? "" : "s"}</p>
+                        </div>
+
+                        <div className="p-3 rounded-xl bg-background border border-border/60 shadow-2xs col-span-2 sm:col-span-1">
+                          <p className="text-[10px] uppercase text-muted-foreground font-semibold">Max Reachable %</p>
+                          <p className="text-xl font-bold text-primary">
+                            {semesterProjection.maxPossiblePercentage.toFixed(1)}%
+                          </p>
+                          <p className="text-[10px] text-muted-foreground">with 100% attendance</p>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-muted-foreground">
+                        {semesterProjection.message}
+                      </p>
+
+                      {timetableMetrics?.nextClass && (
+                        <div className="rounded-lg bg-background/80 border border-border/60 px-3 py-2 text-xs flex items-center justify-between text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <Clock className="h-3.5 w-3.5 text-primary" />
+                            <span>Next class: <strong className="text-foreground">{timetableMetrics.nextClass.date} ({timetableMetrics.nextClass.startTime}–{timetableMetrics.nextClass.endTime})</strong></span>
+                          </span>
+                          {timetableMetrics.nextClass.room && (
+                            <span className="text-[11px] font-medium">{timetableMetrics.nextClass.room}</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>
@@ -787,6 +893,39 @@ export function CalculatorSimulatorView({
                       </div>
                     )}
                   </div>
+
+                  {/* Calendar-Aware Recovery Date Prediction */}
+                  {recoveryDatePrediction && recoveryDatePrediction.recoveryDate && recovery.status === "RECOVERABLE" && (
+                    <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-xl bg-primary/15 text-primary flex items-center justify-center shrink-0 shadow-xs">
+                          <Calendar className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                              Predicted Recovery Date
+                            </p>
+                            <Badge className="bg-primary/20 text-primary border-primary/30 text-[10px] py-0 px-1.5 font-semibold">
+                              Timetable Projected
+                            </Badge>
+                          </div>
+                          <p className="text-base sm:text-lg font-bold text-foreground">
+                            {recoveryDatePrediction.formattedDate}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            Attend all upcoming classes to reach {targetPercentage}% on {recoveryDatePrediction.dayName} ({recoveryDatePrediction.classesNeeded} classes from today).
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right sm:text-right shrink-0">
+                        <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs px-2.5 py-1">
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Reachable
+                        </Badge>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Explanatory Message Box */}
                   <div

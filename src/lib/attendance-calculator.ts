@@ -253,3 +253,159 @@ export function simulateAttendance(
     summaryText,
   };
 }
+
+export interface RecoveryDateResult {
+  reachable: boolean;
+  recoveryDate?: string; // YYYY-MM-DD
+  formattedDate?: string; // e.g. "Thu, 15 Oct 2026"
+  dayName?: string;
+  classesNeeded: number;
+  classesRemaining: number;
+  message: string;
+}
+
+/**
+ * Predicts the exact calendar date a student will reach their target percentage
+ * based on their consecutive future scheduled class dates.
+ */
+export function calculateRecoveryDate(
+  classesNeeded: number,
+  upcomingClasses: { date: string; dayOfWeek?: number }[]
+): RecoveryDateResult {
+  const needed = Math.max(0, Math.floor(classesNeeded || 0));
+  const remaining = upcomingClasses.length;
+
+  if (needed === 0) {
+    return {
+      reachable: true,
+      classesNeeded: 0,
+      classesRemaining: remaining,
+      message: "Attendance is already at or above target.",
+    };
+  }
+
+  if (remaining < needed) {
+    return {
+      reachable: false,
+      classesNeeded: needed,
+      classesRemaining: remaining,
+      message: `Need ${needed} classes, but only ${remaining} scheduled class${remaining === 1 ? "" : "es"} remain in the semester.`,
+    };
+  }
+
+  const targetClass = upcomingClasses[needed - 1];
+  if (!targetClass || !targetClass.date) {
+    return {
+      reachable: false,
+      classesNeeded: needed,
+      classesRemaining: remaining,
+      message: "Unable to determine recovery date from schedule.",
+    };
+  }
+
+  const parts = targetClass.date.split("-").map(Number);
+  const dateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+  const formatted = dateObj.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+  const dayName = dateObj.toLocaleDateString("en-US", { weekday: "long" });
+
+  return {
+    reachable: true,
+    recoveryDate: targetClass.date,
+    formattedDate: formatted,
+    dayName,
+    classesNeeded: needed,
+    classesRemaining: remaining,
+    message: `Attend all next ${needed} classes to reach target on ${formatted}.`,
+  };
+}
+
+export interface SemesterProjectionResult {
+  currentAttended: number;
+  currentTotal: number;
+  currentPercentage: number;
+  scheduledRemaining: number;
+  semesterTotalClasses: number;
+  bunksPlanned: number;
+  projectedAttended: number;
+  projectedPercentage: number;
+  maxPossiblePercentage: number;
+  safeBunksTotal: number;
+  targetPercentage: number;
+  isAboveTarget: boolean;
+  message: string;
+}
+
+/**
+ * Calculates projected attendance at semester end given planned bunks in remaining classes.
+ */
+export function simulateSemesterProjection(
+  attended: number,
+  total: number,
+  scheduledRemaining: number,
+  bunksPlanned: number,
+  targetPercentage: number
+): SemesterProjectionResult {
+  const safeAttended = Math.max(0, Math.floor(attended || 0));
+  const safeTotal = Math.max(safeAttended, Math.floor(total || 0));
+  const safeRemaining = Math.max(0, Math.floor(scheduledRemaining || 0));
+  const safeBunks = Math.min(safeRemaining, Math.max(0, Math.floor(bunksPlanned || 0)));
+  const safeTarget = Math.min(100, Math.max(0, targetPercentage || 0));
+
+  const currentPct =
+    safeTotal > 0 ? Math.round((safeAttended / safeTotal) * 10000) / 100 : 0;
+
+  const semesterTotal = safeTotal + safeRemaining;
+  const maxPossibleAttended = safeAttended + safeRemaining;
+  const maxPossiblePct =
+    semesterTotal > 0
+      ? Math.round((maxPossibleAttended / semesterTotal) * 10000) / 100
+      : 0;
+
+  // Maximum safe bunks across the entire remaining semester
+  let safeBunksTotal = 0;
+  if (semesterTotal > 0) {
+    const minAttendedForTarget = Math.ceil((safeTarget * semesterTotal) / 100);
+    safeBunksTotal = Math.max(
+      0,
+      Math.min(safeRemaining, maxPossibleAttended - minAttendedForTarget)
+    );
+  }
+
+  // Projected with planned bunks
+  const projAttended = safeAttended + (safeRemaining - safeBunks);
+  const projPct =
+    semesterTotal > 0
+      ? Math.round((projAttended / semesterTotal) * 10000) / 100
+      : 0;
+
+  const isAbove = projPct >= safeTarget;
+
+  let message = "";
+  if (safeBunks === 0) {
+    message = `Attending all ${safeRemaining} remaining classes yields a final ${projPct.toFixed(1)}% at semester end.`;
+  } else {
+    message = `Bunking ${safeBunks} of ${safeRemaining} remaining classes leaves you with ${projPct.toFixed(1)}% (${isAbove ? "Above" : "Below"} ${safeTarget}% target).`;
+  }
+
+  return {
+    currentAttended: safeAttended,
+    currentTotal: safeTotal,
+    currentPercentage: currentPct,
+    scheduledRemaining: safeRemaining,
+    semesterTotalClasses: semesterTotal,
+    bunksPlanned: safeBunks,
+    projectedAttended: projAttended,
+    projectedPercentage: projPct,
+    maxPossiblePercentage: maxPossiblePct,
+    safeBunksTotal,
+    targetPercentage: safeTarget,
+    isAboveTarget: isAbove,
+    message,
+  };
+}
+

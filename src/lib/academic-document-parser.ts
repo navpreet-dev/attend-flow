@@ -292,6 +292,162 @@ function parseAmritsarBcaTimetable(
 }
 
 /**
+ * Validate that a document text contains timetable indicators.
+ * Rejects random/unrelated documents (invoices, resumes, essays, cat photos, etc.).
+ */
+export function validateIsTimetable(
+  rawText: string,
+  availableSubjects: { subjectCode: string; subjectName: string }[] = []
+): { valid: boolean; error?: string } {
+  if (!rawText || rawText.trim().length < 10) {
+    return {
+      valid: false,
+      error: "The uploaded file contains insufficient text to be a timetable. Please upload a clear schedule.",
+    };
+  }
+
+  const lower = rawText.toLowerCase();
+
+  // 1. Days of the week
+  const dayKeywords = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const matchedDays = dayKeywords.filter((d) => new RegExp(`\\b${d}\\b`, "i").test(lower));
+
+  // 2. Timetable / class keywords
+  const timetableKeywords = [
+    "time table",
+    "timetable",
+    "class wise",
+    "schedule",
+    "lecture",
+    "lectures",
+    "period",
+    "periods",
+    "slot",
+    "timing",
+    "timings",
+    "break",
+    "lunch",
+    "teacher",
+    "faculty",
+    "sec-",
+    "section",
+    "semester",
+    "department",
+  ];
+  const matchedKeywords = timetableKeywords.filter((kw) => lower.includes(kw));
+
+  // 3. Time range patterns (e.g. 9:00-9:50, 10:00 to 11:00, 09:30 - 10:30, 1:10 - 2:00)
+  const hasTimePattern =
+    /\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?\s*(?:-|–|to)\s*\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?\b/i.test(
+      rawText
+    );
+
+  // 4. Any matched subject from the student's enrolled list (any department/course)
+  const hasSubjectMatch = availableSubjects.some((s) => {
+    const sName = s.subjectName.toLowerCase();
+    const sCode = s.subjectCode.toLowerCase();
+    return (
+      (sName.length > 3 && lower.includes(sName)) ||
+      (sCode.length > 3 && lower.includes(sCode))
+    );
+  });
+
+  // Valid timetable must have either:
+  // - Days of week + (timetable keywords OR time ranges OR subjects)
+  // - OR time ranges + (timetable keywords OR subjects)
+  // - OR multiple days of week (>= 2)
+  const isTimetable =
+    (matchedDays.length >= 1 && (matchedKeywords.length >= 1 || hasTimePattern || hasSubjectMatch)) ||
+    (hasTimePattern && (matchedKeywords.length >= 1 || hasSubjectMatch)) ||
+    matchedDays.length >= 2;
+
+  if (!isTimetable) {
+    return {
+      valid: false,
+      error:
+        "This file does not appear to be a class timetable. We could not detect days of the week, lecture time slots, or class subjects. Please upload an official weekly class schedule.",
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Validate that a document text contains academic calendar indicators.
+ * Rejects non-calendar documents.
+ */
+export function validateIsAcademicCalendar(rawText: string): { valid: boolean; error?: string } {
+  if (!rawText || rawText.trim().length < 10) {
+    return {
+      valid: false,
+      error: "The uploaded file contains insufficient text to be an academic calendar.",
+    };
+  }
+
+  const lower = rawText.toLowerCase();
+
+  // 1. Calendar / Term keywords
+  const calendarKeywords = [
+    "academic calendar",
+    "calendar",
+    "semester",
+    "session",
+    "odd semester",
+    "even semester",
+    "term",
+    "w.e.f.",
+    "teaching days",
+    "working days",
+    "holiday",
+    "holidays",
+    "vacation",
+    "vacations",
+    "examination",
+    "exam",
+    "mst",
+    "diwali",
+    "dussehra",
+    "independence day",
+    "republic day",
+    "christmas",
+    "jayanti",
+    "start of semester",
+    "end of semester",
+    "commence",
+    "orientation",
+  ];
+  const matchedKeywords = calendarKeywords.filter((kw) => lower.includes(kw));
+
+  // 2. Date patterns (e.g. 15.07.2026, 15/08/2026, 15-08-2026, 15 Aug, August 2026)
+  const hasDatePattern =
+    /\b\d{1,2}[-/.](?:\d{1,2}|[A-Za-z]{3,9})[-/.]\d{2,4}\b/.test(rawText) ||
+    /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}\b/i.test(rawText) ||
+    /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(rawText);
+
+  // 3. Month names
+  const monthNames = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+  ];
+  const matchedMonths = monthNames.filter((m) => lower.includes(m));
+
+  const isCalendar =
+    (matchedKeywords.length >= 1 && (hasDatePattern || matchedMonths.length >= 1)) ||
+    matchedKeywords.length >= 2 ||
+    (hasDatePattern && matchedMonths.length >= 2);
+
+  if (!isCalendar) {
+    return {
+      valid: false,
+      error:
+        "This file does not appear to be an academic calendar. We could not find semester dates, academic terms, or holidays. Please upload an official academic calendar document.",
+    };
+  }
+
+  return { valid: true };
+}
+
+/**
  * Parse Timetable Text into Structured Entries
  */
 export function parseTimetableDocument(
@@ -299,6 +455,12 @@ export function parseTimetableDocument(
   fileName: string,
   agcSubjects: { subjectCode: string; subjectName: string }[] = []
 ): ParsedTimetableResult {
+  // Validate that document is actually a timetable
+  const validation = validateIsTimetable(rawText, agcSubjects);
+  if (!validation.valid) {
+    throw new Error(validation.error || "Uploaded document is not a timetable.");
+  }
+
   // Check if document matches Amritsar BCA schedule first
   const agcBcaParsed = parseAmritsarBcaTimetable(rawText, fileName, agcSubjects);
   if (agcBcaParsed && agcBcaParsed.entries.length > 0) {
@@ -462,6 +624,12 @@ export function parseAcademicCalendarDocument(
   rawText: string,
   fileName: string
 ): ParsedAcademicCalendarResult {
+  // Validate that document is actually an academic calendar
+  const validation = validateIsAcademicCalendar(rawText);
+  if (!validation.valid) {
+    throw new Error(validation.error || "Uploaded document is not an academic calendar.");
+  }
+
   const lines = rawText
     .split(/\r?\n/)
     .map((l) => l.trim())

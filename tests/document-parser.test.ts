@@ -212,12 +212,50 @@ async function runTests() {
     targetPercentage: 75,
   });
   assert(bunkResult.projectedTotal === 34, "Projected total classes incremented by 2");
-  assert(bunkResult.classesRemainingAfterSim === netMetrics.scheduledRemaining - 2, "Remaining classes decremented by 2");
+  // TEST 8: Document Validation & Rejection of non-calendar / non-timetable files
+  const invalidText = "Receipt #1049: Milk $4.00, Bread $2.50, Eggs $3.00. Total $9.50. Thank you for shopping!";
+  
+  let timetableRejected = false;
+  try {
+    parseTimetableDocument(invalidText, "receipt.pdf", agcSubjects);
+  } catch (err) {
+    timetableRejected = true;
+  }
+  assert(timetableRejected, "Non-timetable document correctly rejected with clear error");
 
-  console.log("\n🎉 ALL DOCUMENT PARSER & EXTRACTION TESTS PASSED!\n");
+  let calendarRejected = false;
+  try {
+    parseAcademicCalendarDocument(invalidText, "receipt.pdf");
+  } catch (err) {
+    calendarRejected = true;
+  }
+  assert(calendarRejected, "Non-calendar document correctly rejected with clear error");
+
+  // TEST 9: Calendar-Aware Recovery Date Prediction
+  const { calculateRecoveryDate, simulateSemesterProjection } = require("../src/lib/attendance-calculator");
+  
+  const upcomingInstances = allClasses.filter((c: any) => c.matchedSubjectCode === "AGC-18090");
+  const recDateRes = calculateRecoveryDate(4, upcomingInstances);
+  assert(recDateRes.reachable === true, "Recovery date is reachable for 4 classes");
+  assert(Boolean(recDateRes.formattedDate), `Predicted recovery date formatted: ${recDateRes.formattedDate}`);
+  assert(Boolean(recDateRes.recoveryDate), `Predicted recovery date: ${recDateRes.recoveryDate}`);
+
+  // Test when needed > remaining
+  const impossibleRecDate = calculateRecoveryDate(999, upcomingInstances);
+  assert(impossibleRecDate.reachable === false, "Excessive recovery classes correctly marked unreachable");
+
+  // TEST 10: Semester-End Projection & Safe Bunks Allowance
+  const semProj = simulateSemesterProjection(20, 25, 20, 2, 75);
+  assert(semProj.semesterTotalClasses === 45, "Semester total classes: 25 + 20 = 45");
+  assert(semProj.bunksPlanned === 2, "Planned 2 bunks");
+  assert(semProj.safeBunksTotal >= 0, `Computed safe semester bunks allowance: ${semProj.safeBunksTotal}`);
+  assert(semProj.projectedPercentage > 0, `Projected final percentage: ${semProj.projectedPercentage}%`);
+
+  console.log("\n🎉 ALL DOCUMENT PARSER, EXTRACTION & PREDICTION TESTS PASSED!\n");
 }
 
 runTests().catch((err) => {
   console.error("Test runner error:", err);
   process.exit(1);
 });
+

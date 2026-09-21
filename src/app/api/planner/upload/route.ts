@@ -70,17 +70,30 @@ export async function POST(req: NextRequest) {
         select: { subjectCode: true, subjectName: true },
       });
 
-      const parsedTimetable = parseTimetableDocument(
-        extracted.rawText,
-        file.name,
-        studentSubjects
-      );
+      let parsedTimetable;
+      try {
+        parsedTimetable = parseTimetableDocument(
+          extracted.rawText,
+          file.name,
+          studentSubjects
+        );
+      } catch (valErr) {
+        return NextResponse.json(
+          {
+            error:
+              valErr instanceof Error
+                ? valErr.message
+                : "The uploaded file does not appear to be a class timetable. Please upload an official weekly schedule.",
+          },
+          { status: 422 }
+        );
+      }
 
       if (parsedTimetable.entries.length === 0) {
         return NextResponse.json(
           {
             error:
-              "We couldn't confidently detect any scheduled class times in this timetable document. Please upload a clearer PDF, Word, or image schedule.",
+              "We couldn't detect any scheduled class times in this timetable document. Please upload a clearer PDF, Word, or image schedule.",
             rawSnippet: extracted.rawText.slice(0, 300),
           },
           { status: 422 }
@@ -98,10 +111,23 @@ export async function POST(req: NextRequest) {
 
     // 3. Parse Academic Calendar
     if (docType === "calendar") {
-      const parsedCalendar = parseAcademicCalendarDocument(
-        extracted.rawText,
-        file.name
-      );
+      let parsedCalendar;
+      try {
+        parsedCalendar = parseAcademicCalendarDocument(
+          extracted.rawText,
+          file.name
+        );
+      } catch (valErr) {
+        return NextResponse.json(
+          {
+            error:
+              valErr instanceof Error
+                ? valErr.message
+                : "The uploaded file does not appear to be an academic calendar. Please upload an official calendar document.",
+          },
+          { status: 422 }
+        );
+      }
 
       return NextResponse.json({
         ok: true,

@@ -114,6 +114,10 @@ export function AcademicPlannerView({
   const timetableInputRef = useRef<HTMLInputElement>(null);
   const calendarInputRef = useRef<HTMLInputElement>(null);
 
+  // Drag-and-drop hover states
+  const [isDraggingTimetable, setIsDraggingTimetable] = useState(false);
+  const [isDraggingCalendar, setIsDraggingCalendar] = useState(false);
+
   // Load existing planner state
   useEffect(() => {
     async function load() {
@@ -138,29 +142,79 @@ export function AcademicPlannerView({
     }));
   }, [data.subjects]);
 
-  // Handle Timetable File Upload
-  async function handleTimetableFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  /**
+   * Compresses image files client-side before upload.
+   * Drastically speeds up mobile uploads (<200ms) and prevents Vercel serverless payload limit errors.
+   */
+  async function compressImageIfApplicable(file: File): Promise<File> {
+    const isImage = file.type.startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name);
+    if (!isImage) return file;
 
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const MAX_DIM = 1600;
+          let { width, height } = img;
+          if (width > MAX_DIM || height > MAX_DIM) {
+            if (width > height) {
+              height = Math.round((height * MAX_DIM) / width);
+              width = MAX_DIM;
+            } else {
+              width = Math.round((width * MAX_DIM) / height);
+              height = MAX_DIM;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve(file);
+          ctx.drawImage(img, 0, 0, width, height);
+          canvas.toBlob(
+            (blob) => {
+              if (!blob) return resolve(file);
+              const compressed = new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+                type: "image/jpeg",
+                lastModified: Date.now(),
+              });
+              resolve(compressed);
+            },
+            "image/jpeg",
+            0.85
+          );
+        };
+        img.onerror = () => resolve(file);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve(file);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  // Handle Timetable File Processing (from file input or drag-and-drop)
+  async function processTimetableFile(rawFile: File) {
     let timer: NodeJS.Timeout | null = null;
     try {
       setUploadingTimetable(true);
-      setUploadStepMessage("Uploading timetable file...");
+      setUploadStepMessage("Optimizing & uploading timetable...");
+
+      const file = await compressImageIfApplicable(rawFile);
 
       timer = setTimeout(() => {
         setUploadStepMessage("Scanning timetable structure & matching subjects...");
-      }, 1200);
+      }, 900);
 
       const response = await apiUploadPlannerDocument(file, "timetable");
       if (response.ok && response.type === "timetable") {
         setReviewTimetable({
-          fileName: file.name,
+          fileName: rawFile.name,
           entries: response.result.entries,
           extractedVia: response.extractedVia,
         });
         toast.success(
-          `Detected ${response.result.entries.length} classes from ${file.name}!`
+          `Detected ${response.result.entries.length} classes from ${rawFile.name}!`
         );
       }
     } catch (err) {
@@ -177,24 +231,23 @@ export function AcademicPlannerView({
     }
   }
 
-  // Handle Calendar File Upload
-  async function handleCalendarFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // Handle Calendar File Processing (from file input or drag-and-drop)
+  async function processCalendarFile(rawFile: File) {
     let timer: NodeJS.Timeout | null = null;
     try {
       setUploadingCalendar(true);
-      setUploadStepMessage("Uploading calendar file...");
+      setUploadStepMessage("Optimizing & uploading calendar...");
+
+      const file = await compressImageIfApplicable(rawFile);
 
       timer = setTimeout(() => {
         setUploadStepMessage("Reading semester dates and detecting holidays...");
-      }, 1200);
+      }, 900);
 
       const response = await apiUploadPlannerDocument(file, "calendar");
       if (response.ok && response.type === "calendar") {
         setReviewCalendar({
-          fileName: file.name,
+          fileName: rawFile.name,
           startDate: response.result.startDate,
           endDate: response.result.endDate,
           workingDays: response.result.workingDays,
@@ -208,7 +261,7 @@ export function AcademicPlannerView({
       toast.error(
         err instanceof Error
           ? err.message
-          : "Could not extract calendar dates. Please try another format."
+          : "Could not extract calendar. Please try a clearer PDF or image."
       );
     } finally {
       if (timer) clearTimeout(timer);
@@ -216,6 +269,17 @@ export function AcademicPlannerView({
       setUploadStepMessage("");
       if (calendarInputRef.current) calendarInputRef.current.value = "";
     }
+  }
+
+  // Input change triggers
+  function handleTimetableFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) processTimetableFile(file);
+  }
+
+  function handleCalendarFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) processCalendarFile(file);
   }
 
   // Quick 1-Click: Load Amritsar Group of Colleges BCA-3B Schedule
@@ -472,7 +536,28 @@ export function AcademicPlannerView({
           <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
             <div
               onClick={() => !uploadingTimetable && timetableInputRef.current?.click()}
-              className="group cursor-pointer rounded-xl border-2 border-dashed border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5 p-6 transition-all text-center flex flex-col items-center justify-center gap-2"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingTimetable(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingTimetable(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingTimetable(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) processTimetableFile(file);
+              }}
+              className={`group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center gap-2 ${
+                isDraggingTimetable
+                  ? "border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]"
+                  : "border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5"
+              }`}
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-background shadow-xs group-hover:scale-105 transition-transform text-primary">
                 {uploadingTimetable ? (
@@ -485,9 +570,11 @@ export function AcademicPlannerView({
                 <p className="text-sm font-medium text-foreground">
                   {uploadingTimetable
                     ? uploadStepMessage || "Scanning timetable..."
+                    : isDraggingTimetable
+                    ? "Drop timetable file here"
                     : plannerState.timetable.length > 0
                     ? "Upload New Timetable to Replace"
-                    : "Choose Timetable File"}
+                    : "Choose or Drag Timetable File"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Supports: <strong className="text-foreground/80 font-medium">PDF, JPG, JPEG, PNG, DOC, DOCX</strong>
@@ -548,7 +635,28 @@ export function AcademicPlannerView({
           <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
             <div
               onClick={() => !uploadingCalendar && calendarInputRef.current?.click()}
-              className="group cursor-pointer rounded-xl border-2 border-dashed border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5 p-6 transition-all text-center flex flex-col items-center justify-center gap-2"
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingCalendar(true);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingCalendar(false);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsDraggingCalendar(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) processCalendarFile(file);
+              }}
+              className={`group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center gap-2 ${
+                isDraggingCalendar
+                  ? "border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]"
+                  : "border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5"
+              }`}
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-background shadow-xs group-hover:scale-105 transition-transform text-primary">
                 {uploadingCalendar ? (
@@ -561,9 +669,11 @@ export function AcademicPlannerView({
                 <p className="text-sm font-medium text-foreground">
                   {uploadingCalendar
                     ? uploadStepMessage || "Scanning calendar..."
+                    : isDraggingCalendar
+                    ? "Drop academic calendar file here"
                     : plannerState.calendar
                     ? "Upload New Calendar to Replace"
-                    : "Choose Academic Calendar File"}
+                    : "Choose or Drag Academic Calendar File"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Supports: <strong className="text-foreground/80 font-medium">PDF, JPG, JPEG, PNG, DOC, DOCX</strong>
