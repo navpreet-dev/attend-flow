@@ -1,0 +1,480 @@
+/**
+ * Academic Document Parser
+ *
+ * Converts raw document text into structured Timetable and Academic Calendar models.
+ * Matches detected subjects against AGC student subjects safely and deterministically.
+ */
+
+import { matchTimetableSubject } from "./academic-planner";
+
+export interface ParsedTimetableEntry {
+  id: string; // temp client key
+  dayOfWeek: number; // 1 = Monday ... 7 = Sunday
+  dayName: string;
+  startTime: string; // HH:mm (24h)
+  endTime: string; // HH:mm (24h)
+  subjectName: string;
+  subjectCode: string;
+  room?: string;
+  teacher?: string;
+  matchedSubjectCode?: string | null;
+  matchedSubjectName?: string | null;
+  matchConfidence: "high" | "medium" | "none";
+  needsReview: boolean;
+}
+
+export interface ParsedTimetableResult {
+  fileName: string;
+  entries: ParsedTimetableEntry[];
+  summary: {
+    totalClassesDetected: number;
+    daysWithClasses: string[];
+    uniqueSubjectsCount: number;
+    needsReviewCount: number;
+  };
+}
+
+export interface ParsedHolidayItem {
+  date: string; // YYYY-MM-DD
+  name: string;
+}
+
+export interface ParsedAcademicCalendarResult {
+  fileName: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  workingDays: number[]; // 1-7
+  holidays: ParsedHolidayItem[];
+  needsReview: boolean;
+  notes: string[];
+}
+
+const DAY_MAP: Record<string, { num: number; name: string }> = {
+  monday: { num: 1, name: "Monday" },
+  mon: { num: 1, name: "Monday" },
+  mo: { num: 1, name: "Monday" },
+  tuesday: { num: 2, name: "Tuesday" },
+  tue: { num: 2, name: "Tuesday" },
+  tues: { num: 2, name: "Tuesday" },
+  tu: { num: 2, name: "Tuesday" },
+  wednesday: { num: 3, name: "Wednesday" },
+  wed: { num: 3, name: "Wednesday" },
+  we: { num: 3, name: "Wednesday" },
+  thursday: { num: 4, name: "Thursday" },
+  thu: { num: 4, name: "Thursday" },
+  thur: { num: 4, name: "Thursday" },
+  thurs: { num: 4, name: "Thursday" },
+  th: { num: 4, name: "Thursday" },
+  friday: { num: 5, name: "Friday" },
+  fri: { num: 5, name: "Friday" },
+  fr: { num: 5, name: "Friday" },
+  saturday: { num: 6, name: "Saturday" },
+  sat: { num: 6, name: "Saturday" },
+  sa: { num: 6, name: "Saturday" },
+  sunday: { num: 7, name: "Sunday" },
+  sun: { num: 7, name: "Sunday" },
+  su: { num: 7, name: "Sunday" },
+};
+
+const MONTH_MAP: Record<string, number> = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+/**
+ * Standardize time string into HH:mm (24-hour format)
+ */
+function standardizeTime(raw: string, meridiemHint?: string): string | null {
+  const clean = raw.trim().toLowerCase();
+  const match = clean.match(/^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$/);
+  if (!match) return null;
+
+  let hour = parseInt(match[1], 10);
+  const minute = match[2] ? parseInt(match[2], 10) : 0;
+  const meridiem = match[3] || meridiemHint?.toLowerCase();
+
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+
+  // Infer PM for common college afternoon hours if ambiguous (e.g. 1-6)
+  if (!meridiem && hour >= 1 && hour <= 6) {
+    hour += 12;
+  }
+
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+/**
+ * Extract time range from a text line
+ */
+function extractTimeRange(
+  text: string
+): { startTime: string; endTime: string; matchedString: string } | null {
+  // Patterns like 10:00 - 11:00, 10:00 AM to 11:00 AM, 10-11 AM, 09:30 - 10:30
+  const timeRegex =
+    /\b(\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?)\s*(?:-|–|to)\s*(\d{1,2}(?:[:.]\d{2})?\s*(am|pm)?)\b/i;
+  const match = text.match(timeRegex);
+  if (!match) return null;
+
+  const rawStart = match[1];
+  const rawEnd = match[2];
+  const endMeridiem = match[3];
+
+  const startTime = standardizeTime(rawStart, endMeridiem);
+  const endTime = standardizeTime(rawEnd, endMeridiem);
+
+  if (!startTime || !endTime) return null;
+  return { startTime, endTime, matchedString: match[0] };
+}
+
+/**
+ * Clean subject title from raw segment
+ */
+function cleanSubjectText(raw: string): {
+  subjectName: string;
+  room?: string;
+  teacher?: string;
+} {
+  let text = raw.trim();
+
+  // Extract Room
+  let room: string | undefined;
+  const roomMatch = text.match(
+    /\b(Lab\s*[-#]?\s*\d+|Room\s*[-#]?\s*\d+|LT\s*[-#]?\s*\d+|CR\s*[-#]?\s*\d+|Hall\s*[-#]?\s*\d+)\b/i
+  );
+  if (roomMatch) {
+    room = roomMatch[0].trim();
+    text = text.replace(roomMatch[0], " ");
+  }
+
+  // Extract Teacher
+  let teacher: string | undefined;
+  const teacherMatch = text.match(
+    /\b((?:Dr|Prof|Mr|Ms|Mrs|Er)\.?\s+[A-Za-z]+(?:\s+[A-Za-z]+)?)\b/i
+  );
+  if (teacherMatch) {
+    teacher = teacherMatch[0].trim();
+    text = text.replace(teacherMatch[0], " ");
+  }
+
+  // Clean remaining text
+  text = text
+    .replace(/^[-–:|]+/, "")
+    .replace(/[-–:|]+$/, "")
+    .replace(/\b(period|lecture|lec|theory|class|subject|slot|course)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return { subjectName: text, room, teacher };
+}
+
+/**
+ * Parse Timetable Text into Structured Entries
+ */
+export function parseTimetableDocument(
+  rawText: string,
+  fileName: string,
+  agcSubjects: { subjectCode: string; subjectName: string }[] = []
+): ParsedTimetableResult {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const entries: ParsedTimetableEntry[] = [];
+  let currentDay: { num: number; name: string } | null = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Check if line is a Day header
+    const lower = line.toLowerCase();
+    const words = lower.split(/[\s,–:|-]+/).filter(Boolean);
+    const dayFound = words.find((w) => DAY_MAP[w]);
+
+    if (dayFound && words.length <= 4) {
+      currentDay = DAY_MAP[dayFound];
+      continue;
+    }
+
+    // Check if line contains day within it
+    let lineDay = currentDay;
+    if (dayFound) {
+      lineDay = DAY_MAP[dayFound];
+    }
+
+    // Check for break/lunch/recess
+    if (/\b(lunch|recess|tiffin|interval|tea break|break)\b/i.test(line)) {
+      continue;
+    }
+
+    // Extract time range
+    const timeInfo = extractTimeRange(line);
+    if (!timeInfo) continue;
+
+    // Default to Monday if no day header seen yet
+    if (!lineDay) {
+      lineDay = { num: 1, name: "Monday" };
+    }
+
+    // Remove the time string to find subject name
+    const remainder = line.replace(timeInfo.matchedString, " ");
+    const { subjectName, room, teacher } = cleanSubjectText(remainder);
+
+    if (!subjectName || subjectName.length < 2) continue;
+
+    // Check AGC subject matching
+    const match = matchTimetableSubject(subjectName, agcSubjects);
+
+    const matchedSubject = match.matchedCode
+      ? agcSubjects.find((s) => s.subjectCode === match.matchedCode)
+      : null;
+
+    let matchConfidence: "high" | "medium" | "none" = "none";
+    let needsReview = true;
+
+    if (match.confidence === "exact") {
+      matchConfidence = "high";
+      needsReview = false;
+    } else if (match.confidence === "normalized") {
+      matchConfidence = "medium";
+      needsReview = true;
+    } else {
+      matchConfidence = "none";
+      needsReview = true;
+    }
+
+    entries.push({
+      id: `parsed-${entries.length + 1}-${Date.now()}`,
+      dayOfWeek: lineDay.num,
+      dayName: lineDay.name,
+      startTime: timeInfo.startTime,
+      endTime: timeInfo.endTime,
+      subjectName: matchedSubject ? matchedSubject.subjectName : subjectName,
+      subjectCode: matchedSubject ? matchedSubject.subjectCode : subjectName.slice(0, 10).toUpperCase(),
+      room,
+      teacher,
+      matchedSubjectCode: matchedSubject ? matchedSubject.subjectCode : null,
+      matchedSubjectName: matchedSubject ? matchedSubject.subjectName : null,
+      matchConfidence,
+      needsReview,
+    });
+  }
+
+  // Generate summary
+  const uniqueDays = Array.from(new Set(entries.map((e) => e.dayName)));
+  const uniqueSubjects = Array.from(new Set(entries.map((e) => e.subjectName)));
+  const needsReviewCount = entries.filter((e) => e.needsReview).length;
+
+  return {
+    fileName,
+    entries,
+    summary: {
+      totalClassesDetected: entries.length,
+      daysWithClasses: uniqueDays,
+      uniqueSubjectsCount: uniqueSubjects.length,
+      needsReviewCount,
+    },
+  };
+}
+
+/**
+ * Format a Date to YYYY-MM-DD
+ */
+function toDateString(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Parse date from string
+ */
+function parseDateSnippet(text: string, currentYear: number = new Date().getFullYear()): string | null {
+  // DD/MM/YYYY or DD-MM-YYYY
+  const numMatch = text.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b/);
+  if (numMatch) {
+    const d = parseInt(numMatch[1], 10);
+    const m = parseInt(numMatch[2], 10);
+    let y = parseInt(numMatch[3], 10);
+    if (y < 100) y += 2000;
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+      return toDateString(y, m, d);
+    }
+  }
+
+  // DD Month (YYYY) or Month DD (YYYY)
+  const monthNames = Object.keys(MONTH_MAP).join("|");
+  const textMatch = text.match(new RegExp(`\\b(\\d{1,2})\\s+(${monthNames})(?:\\s+(\\d{2,4}))?\\b`, "i"));
+  if (textMatch) {
+    const d = parseInt(textMatch[1], 10);
+    const m = MONTH_MAP[textMatch[2].toLowerCase()];
+    const y = textMatch[3] ? (parseInt(textMatch[3], 10) < 100 ? parseInt(textMatch[3], 10) + 2000 : parseInt(textMatch[3], 10)) : currentYear;
+    if (m && d >= 1 && d <= 31) {
+      return toDateString(y, m, d);
+    }
+  }
+
+  const textMatchRev = text.match(new RegExp(`\\b(${monthNames})\\s+(\\d{1,2})(?:,? +(\\d{2,4}))?\\b`, "i"));
+  if (textMatchRev) {
+    const m = MONTH_MAP[textMatchRev[1].toLowerCase()];
+    const d = parseInt(textMatchRev[2], 10);
+    const y = textMatchRev[3] ? (parseInt(textMatchRev[3], 10) < 100 ? parseInt(textMatchRev[3], 10) + 2000 : parseInt(textMatchRev[3], 10)) : currentYear;
+    if (m && d >= 1 && d <= 31) {
+      return toDateString(y, m, d);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Parse Academic Calendar Text into Dates and Holidays
+ */
+export function parseAcademicCalendarDocument(
+  rawText: string,
+  fileName: string
+): ParsedAcademicCalendarResult {
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const currentYear = new Date().getFullYear();
+  let startDate: string | null = null;
+  let endDate: string | null = null;
+  const holidays: ParsedHolidayItem[] = [];
+  const notes: string[] = [];
+  let workingDays = [1, 2, 3, 4, 5]; // Default Mon-Fri
+
+  // Scan working days
+  const fullText = rawText.toLowerCase();
+  if (fullText.includes("monday to saturday") || fullText.includes("6 day week") || fullText.includes("6 days a week")) {
+    workingDays = [1, 2, 3, 4, 5, 6];
+    notes.push("Detected 6-day academic week (Monday to Saturday).");
+  } else {
+    notes.push("Configured standard 5-day academic week (Monday to Friday).");
+  }
+
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+
+    // Semester start detection
+    if (
+      !startDate &&
+      (lower.includes("start") ||
+        lower.includes("commence") ||
+        lower.includes("session begins") ||
+        lower.includes("term start"))
+    ) {
+      const parsed = parseDateSnippet(line, currentYear);
+      if (parsed) {
+        startDate = parsed;
+        continue;
+      }
+    }
+
+    // Semester end detection
+    if (
+      !endDate &&
+      (lower.includes("end") ||
+        lower.includes("conclude") ||
+        lower.includes("term end") ||
+        lower.includes("last working day") ||
+        lower.includes("exam end"))
+    ) {
+      const parsed = parseDateSnippet(line, currentYear);
+      if (parsed) {
+        endDate = parsed;
+        continue;
+      }
+    }
+
+    // General range pattern (e.g. "Semester: 10 Aug to 20 Dec 2026")
+    if ((!startDate || !endDate) && (lower.includes("semester") || lower.includes("session") || lower.includes("academic year"))) {
+      const dates = line.match(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g);
+      if (dates && dates.length >= 2) {
+        const d1 = parseDateSnippet(dates[0], currentYear);
+        const d2 = parseDateSnippet(dates[1], currentYear);
+        if (d1 && d2) {
+          startDate = d1;
+          endDate = d2;
+          continue;
+        }
+      }
+    }
+
+    // Holiday detection (lines containing holiday names or keywords)
+    const isHolidayLine =
+      lower.includes("holiday") ||
+      lower.includes("jayanti") ||
+      lower.includes("diwali") ||
+      lower.includes("eid") ||
+      lower.includes("christmas") ||
+      lower.includes("independence") ||
+      lower.includes("republic day") ||
+      lower.includes("vacation") ||
+      lower.includes("break") ||
+      lower.includes("festival") ||
+      lower.includes("closed") ||
+      lower.includes("gandhi") ||
+      lower.includes("dussehra") ||
+      lower.includes("holi");
+
+    if (isHolidayLine) {
+      const date = parseDateSnippet(line, currentYear);
+      if (date) {
+        // Clean holiday name
+        const holidayName = line
+          .replace(/\b\d{1,2}[-/.]\d{1,2}[-/.]\d{2,4}\b/g, "")
+          .replace(/\b\d{1,2}\s+[A-Za-z]+(?:\s+\d{2,4})?\b/g, "")
+          .replace(/^[-–:|]+/, "")
+          .replace(/[-–:|]+$/, "")
+          .trim();
+
+        if (!holidays.some((h) => h.date === date)) {
+          holidays.push({
+            date,
+            name: holidayName.length > 2 ? holidayName : "Public Holiday",
+          });
+        }
+      }
+    }
+  }
+
+  // Fallback defaults if dates were not explicitly marked
+  if (!startDate) {
+    startDate = `${currentYear}-08-01`;
+    notes.push(`Semester start date defaulted to ${startDate} (please confirm).`);
+  }
+  if (!endDate) {
+    endDate = `${currentYear}-12-20`;
+    notes.push(`Semester end date defaulted to ${endDate} (please confirm).`);
+  }
+
+  // Ensure chronological order
+  if (startDate > endDate) {
+    const tmp = startDate;
+    startDate = endDate;
+    endDate = tmp;
+  }
+
+  return {
+    fileName,
+    startDate,
+    endDate,
+    workingDays,
+    holidays,
+    needsReview: holidays.length === 0,
+    notes,
+  };
+}

@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       teacher?: string | null;
       matchedSubjectCode?: string | null;
     }>;
+    sourceFileName?: string;
   };
 
   try {
@@ -28,6 +29,7 @@ export async function POST(req: NextRequest) {
   }
 
   const entries = Array.isArray(body.entries) ? body.entries : [];
+  const sourceFileName = body.sourceFileName?.trim() || null;
 
   try {
     // Replace student's timetable entries atomically
@@ -48,6 +50,7 @@ export async function POST(req: NextRequest) {
             room: e.room?.trim() || null,
             teacher: e.teacher?.trim() || null,
             matchedSubjectCode: e.matchedSubjectCode?.trim() || null,
+            sourceFileName,
           })),
         });
       }

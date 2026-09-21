@@ -63,7 +63,9 @@ export async function GET() {
     return NextResponse.json({
       configured: true,
       calendar: calendarConfig,
+      calendarSourceFileName: calendar.sourceFileName,
       timetable: timetableItems,
+      timetableSourceFileName: timetable[0]?.sourceFileName || null,
     });
   } catch (err) {
     console.error("[api/planner] Error fetching planner data:", err);
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest) {
     endDate?: string;
     workingDays?: number[];
     holidays?: { date: string; name?: string }[];
+    sourceFileName?: string;
   };
 
   try {
@@ -100,6 +103,7 @@ export async function POST(req: NextRequest) {
       ? body.workingDays
       : [1, 2, 3, 4, 5];
   const holidays = Array.isArray(body.holidays) ? body.holidays : [];
+  const sourceFileName = body.sourceFileName?.trim() || null;
 
   if (!startDate || !endDate) {
     return NextResponse.json(
@@ -126,11 +130,13 @@ export async function POST(req: NextRequest) {
         startDate,
         endDate,
         workingDays: workingDaysStr,
+        sourceFileName,
       },
       update: {
         startDate,
         endDate,
         workingDays: workingDaysStr,
+        sourceFileName,
       },
     });
 

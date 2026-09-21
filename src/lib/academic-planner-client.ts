@@ -5,11 +5,17 @@ import type {
   TimetableEntryItem,
   HolidayItem,
 } from "./academic-planner";
+import type {
+  ParsedTimetableResult,
+  ParsedAcademicCalendarResult,
+} from "./academic-document-parser";
 
 export interface PlannerState {
   configured: boolean;
   calendar: AcademicCalendarConfig | null;
+  calendarSourceFileName?: string | null;
   timetable: TimetableEntryItem[];
+  timetableSourceFileName?: string | null;
 }
 
 export async function apiGetPlanner(): Promise<PlannerState> {
@@ -25,6 +31,7 @@ export async function apiSaveCalendar(calendar: {
   endDate: string;
   workingDays: number[];
   holidays: HolidayItem[];
+  sourceFileName?: string | null;
 }): Promise<void> {
   const res = await fetch("/api/planner", {
     method: "POST",
@@ -38,12 +45,13 @@ export async function apiSaveCalendar(calendar: {
 }
 
 export async function apiSaveTimetable(
-  entries: TimetableEntryItem[]
+  entries: TimetableEntryItem[],
+  sourceFileName?: string | null
 ): Promise<void> {
   const res = await fetch("/api/planner/timetable", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ entries }),
+    body: JSON.stringify({ entries, sourceFileName }),
   });
   if (!res.ok) {
     const json = await res.json().catch(() => null);
@@ -58,4 +66,42 @@ export async function apiClearPlanner(): Promise<void> {
   if (!res.ok) {
     throw new Error("Failed to clear academic planner");
   }
+}
+
+export type UploadTimetableResponse = {
+  ok: true;
+  type: "timetable";
+  fileName: string;
+  extractedVia: string;
+  result: ParsedTimetableResult;
+};
+
+export type UploadCalendarResponse = {
+  ok: true;
+  type: "calendar";
+  fileName: string;
+  extractedVia: string;
+  result: ParsedAcademicCalendarResult;
+};
+
+export async function apiUploadPlannerDocument(
+  file: File,
+  type: "timetable" | "calendar"
+): Promise<UploadTimetableResponse | UploadCalendarResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("type", type);
+
+  const res = await fetch("/api/planner/upload", {
+    method: "POST",
+    body: formData,
+  });
+
+  const json = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    throw new Error(json?.error || `Failed to process ${type} upload (HTTP ${res.status})`);
+  }
+
+  return json;
 }
