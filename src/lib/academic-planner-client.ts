@@ -46,12 +46,13 @@ export async function apiSaveCalendar(calendar: {
 
 export async function apiSaveTimetable(
   entries: TimetableEntryItem[],
-  sourceFileName?: string | null
+  sourceFileName?: string | null,
+  offDays?: number[]
 ): Promise<void> {
   const res = await fetch("/api/planner/timetable", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ entries, sourceFileName }),
+    body: JSON.stringify({ entries, sourceFileName, offDays: offDays ?? [] }),
   });
   if (!res.ok) {
     const json = await res.json().catch(() => null);

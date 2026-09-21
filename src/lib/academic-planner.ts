@@ -17,6 +17,14 @@ export interface AcademicCalendarConfig {
   endDate: string; // YYYY-MM-DD
   workingDays: number[]; // 1 = Monday, 2 = Tuesday, ..., 7 = Sunday
   holidays: HolidayItem[];
+  /**
+   * Day-of-week numbers (1=Mon..7=Sun) that are ALWAYS off for this student's
+   * section/department according to their uploaded timetable.
+   * Example: [1] means Monday is a department leave even if the academic calendar
+   * considers Monday a working day.
+   * These are combined with (not a replacement for) calendar workingDays and holidays.
+   */
+  timetableOffDays?: number[];
 }
 
 export interface TimetableEntryItem {
@@ -174,6 +182,11 @@ export function generateScheduledClasses(
   );
   const holidaySet = new Set(calendar.holidays.map((h) => h.date));
 
+  // Timetable-specific section/department off-days (e.g. Monday off for BCA-3B).
+  // These override workingDays — even if Monday is a calendar working day,
+  // if the timetable says Monday is off for this section it must be excluded.
+  const timetableOffDaysSet = new Set<number>(calendar.timetableOffDays || []);
+
   // Map timetable by day of week for fast lookup
   const dayMap = new Map<number, TimetableEntryItem[]>();
   for (const entry of timetable) {
@@ -195,8 +208,8 @@ export function generateScheduledClasses(
     const dateStr = toDateString(current);
     const dayOfWeek = getStandardDayOfWeek(current);
 
-    // Skip if non-working day or holiday
-    if (workingDaysSet.has(dayOfWeek) && !holidaySet.has(dateStr)) {
+    // Skip if non-working day, timetable-specific off-day, or academic calendar holiday
+    if (workingDaysSet.has(dayOfWeek) && !timetableOffDaysSet.has(dayOfWeek) && !holidaySet.has(dateStr)) {
       const classesOnDay = dayMap.get(dayOfWeek) || [];
       for (const cls of classesOnDay) {
         // Determine whether this class has already passed

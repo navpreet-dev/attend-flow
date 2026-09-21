@@ -218,9 +218,18 @@ export async function POST(req: NextRequest) {
                 (e) => e.needsReview
               ).length;
 
+              // Convert Gemini's string offDays (e.g. ["MONDAY"]) to day numbers.
+              // These are the timetable-specific section/department weekly off-days.
+              const detectedOffDayNums = Array.from(
+                new Set(
+                  (res.offDays || []).map((d) => DAY_NUM_MAP[(d || "").toUpperCase()] || 0).filter((n) => n >= 1)
+                )
+              ).sort() as number[];
+
               const parsedTimetableResult: ParsedTimetableResult = {
                 fileName: file.name,
                 entries: mappedEntries,
+                offDays: detectedOffDayNums,
                 summary: {
                   totalClassesDetected: mappedEntries.length,
                   daysWithClasses,

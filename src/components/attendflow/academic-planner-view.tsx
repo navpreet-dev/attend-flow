@@ -94,6 +94,7 @@ export function AcademicPlannerView({
     fileName: string;
     entries: ParsedTimetableEntry[];
     extractedVia: string;
+    offDays?: number[];
     summary?: {
       totalClassesDetected: number;
       daysWithClasses: string[];
@@ -262,6 +263,7 @@ export function AcademicPlannerView({
           fileName: rawFile.name,
           entries: response.result.entries,
           extractedVia: response.extractedVia,
+          offDays: response.result.offDays,
           summary: response.result.summary,
         });
         toast.success(
@@ -397,7 +399,8 @@ export function AcademicPlannerView({
         matchedSubjectCode: e.matchedSubjectCode,
       }));
 
-      await apiSaveTimetable(itemsToSave, reviewTimetable.fileName);
+      // Pass detected off-days so they are persisted to the AcademicCalendar record
+      await apiSaveTimetable(itemsToSave, reviewTimetable.fileName, reviewTimetable.offDays);
       const updated = await apiGetPlanner();
       setPlannerState(updated);
       setReviewTimetable(null);

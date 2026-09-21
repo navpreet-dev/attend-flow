@@ -112,15 +112,16 @@ model PushSubscription {
 
 // Optional Academic Calendar configured by the student
 model AcademicCalendar {
-  id             String   @id @default(cuid())
-  studentId      String   @unique
-  startDate      String   // YYYY-MM-DD
-  endDate        String   // YYYY-MM-DD
-  workingDays    String   @default("1,2,3,4,5") // comma-separated: 1=Mon...7=Sun
-  sourceFileName String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  student        Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  id                String   @id @default(cuid())
+  studentId         String   @unique
+  startDate         String   // YYYY-MM-DD
+  endDate           String   // YYYY-MM-DD
+  workingDays       String   @default("1,2,3,4,5") // comma-separated: 1=Mon...7=Sun
+  timetableOffDays  String   @default("")          // comma-separated day nums from timetable (e.g. "1" = Monday off)
+  sourceFileName    String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  student           Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   holidays AcademicHoliday[]
 }

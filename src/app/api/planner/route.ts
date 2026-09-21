@@ -37,10 +37,16 @@ export async function GET() {
       .map((s) => parseInt(s.trim(), 10))
       .filter((n) => !isNaN(n));
 
+    const timetableOffDays = (calendar.timetableOffDays || "")
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n));
+
     const calendarConfig: AcademicCalendarConfig = {
       startDate: calendar.startDate,
       endDate: calendar.endDate,
       workingDays,
+      timetableOffDays,
       holidays: calendar.holidays.map((h) => ({
         id: h.id,
         date: h.date,

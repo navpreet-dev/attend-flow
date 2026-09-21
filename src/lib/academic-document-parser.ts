@@ -27,6 +27,8 @@ export interface ParsedTimetableEntry {
 export interface ParsedTimetableResult {
   fileName: string;
   entries: ParsedTimetableEntry[];
+  /** Day-of-week numbers (1=Mon..7=Sun) that Gemini detected as off-days in this timetable. */
+  offDays?: number[];
   summary: {
     totalClassesDetected: number;
     daysWithClasses: string[];
