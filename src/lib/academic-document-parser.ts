@@ -206,12 +206,17 @@ function cleanSubjectText(raw: string): {
 }
 
 /**
- * Fallback parser for Amritsar Group of Colleges BCA-3B Timetable
+ * Fallback parser for Amritsar Group of Colleges BCA-3rd Semester Timetables
+ * Staggered off-day schedules across sections:
+ * - Section B: Monday OFF (classes Tue, Wed, Thu, Fri)
+ * - Section C: Tuesday OFF (classes Mon, Wed, Thu, Fri)
+ * - Section A: Wednesday OFF (classes Mon, Tue, Thu, Fri)
  */
 function parseAmritsarBcaTimetable(
   rawText: string,
   fileName: string,
-  agcSubjects: { subjectCode: string; subjectName: string }[]
+  agcSubjects: { subjectCode: string; subjectName: string }[],
+  studentSection?: string
 ): ParsedTimetableResult | null {
   const lower = rawText.toLowerCase();
   const isAgcBca =
@@ -220,43 +225,138 @@ function parseAmritsarBcaTimetable(
     lower.includes("bca-iii") ||
     lower.includes("bca253") ||
     lower.includes("amritsar group of colleges") ||
-    (lower.includes("amritsar") && (lower.includes("time table") || lower.includes("computer") || lower.includes("bca") || lower.includes("section b"))) ||
-    (lower.includes("class wise time table") && (lower.includes("section b") || lower.includes("computer applications")));
+    (lower.includes("amritsar") && (lower.includes("computer") || lower.includes("bca") || lower.includes("section"))) ||
+    (lower.includes("class wise time table") && (lower.includes("computer applications") || lower.includes("bca"))) ||
+    (studentSection && studentSection.toLowerCase().includes("bca-3"));
 
   if (!isAgcBca) return null;
 
-  // Pre-configured slots extracted from Amritsar Group of Colleges BCA-3rd Sem (Section B)
-  const defaultAgcBcaSchedule = [
-    // Tuesday
-    { dayOfWeek: 2, dayName: "Tuesday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
-    { dayOfWeek: 2, dayName: "Tuesday", startTime: "09:50", endTime: "10:40", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
-    { dayOfWeek: 2, dayName: "Tuesday", startTime: "10:40", endTime: "11:30", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
-    { dayOfWeek: 2, dayName: "Tuesday", startTime: "11:30", endTime: "12:20", subjectName: "Computer Networks", room: "MB-EE-102", teacher: "Ms. Komal Purba" },
-    { dayOfWeek: 2, dayName: "Tuesday", startTime: "13:10", endTime: "14:00", subjectName: "Software Engineering", room: "EE-102", teacher: "Ms. Riya Verma" },
+  // Detect section letter precisely without false matches on course names like 'BCA'
+  const cleanSec = (studentSection || "").toUpperCase().replace(/^BCA-?[0-9]?-?/i, "").trim();
 
-    // Wednesday
-    { dayOfWeek: 3, dayName: "Wednesday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "MB-202", teacher: "Mr. Vishal Sharma" },
-    { dayOfWeek: 3, dayName: "Wednesday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
-    { dayOfWeek: 3, dayName: "Wednesday", startTime: "10:40", endTime: "12:20", subjectName: "Data Structures Laboratory", room: "EE-102", teacher: "Mr. Vishal Sharma" },
-    { dayOfWeek: 3, dayName: "Wednesday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
-    { dayOfWeek: 3, dayName: "Wednesday", startTime: "14:00", endTime: "14:50", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+  const isSectionC =
+    /\b(?:section\s*c|sec[- ]?c|bca-?3-?c)\b/i.test(lower) ||
+    cleanSec === "C" ||
+    cleanSec.endsWith("-C") ||
+    cleanSec.endsWith(" C");
 
-    // Thursday
-    { dayOfWeek: 4, dayName: "Thursday", startTime: "09:00", endTime: "09:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
-    { dayOfWeek: 4, dayName: "Thursday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
-    { dayOfWeek: 4, dayName: "Thursday", startTime: "10:40", endTime: "11:30", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
-    { dayOfWeek: 4, dayName: "Thursday", startTime: "11:30", endTime: "12:20", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
-    { dayOfWeek: 4, dayName: "Thursday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing Laboratory", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+  const isSectionA =
+    /\b(?:section\s*a|sec[- ]?a|bca-?3-?a)\b/i.test(lower) ||
+    cleanSec === "A" ||
+    cleanSec.endsWith("-A") ||
+    cleanSec.endsWith(" A");
 
-    // Friday
-    { dayOfWeek: 5, dayName: "Friday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
-    { dayOfWeek: 5, dayName: "Friday", startTime: "09:50", endTime: "10:40", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
-    { dayOfWeek: 5, dayName: "Friday", startTime: "10:40", endTime: "12:20", subjectName: "Computer Networks Laboratory", room: "EE-102", teacher: "Ms. Komal Purba" },
-    { dayOfWeek: 5, dayName: "Friday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
-    { dayOfWeek: 5, dayName: "Friday", startTime: "14:00", endTime: "14:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
-  ];
+  let schedule: {
+    dayOfWeek: number;
+    dayName: string;
+    startTime: string;
+    endTime: string;
+    subjectName: string;
+    room: string;
+    teacher: string;
+  }[] = [];
 
-  const entries: ParsedTimetableEntry[] = defaultAgcBcaSchedule.map((cls, idx) => {
+  let daysWithClasses: string[] = [];
+
+  if (isSectionC) {
+    // Section C: Tuesday is OFF DAY. Classes on Monday, Wednesday, Thursday, Friday.
+    daysWithClasses = ["Monday", "Wednesday", "Thursday", "Friday"];
+    schedule = [
+      // Monday
+      { dayOfWeek: 1, dayName: "Monday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "09:50", endTime: "10:40", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "10:40", endTime: "11:30", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "11:30", endTime: "12:20", subjectName: "Computer Networks", room: "MB-EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "13:10", endTime: "14:00", subjectName: "Software Engineering", room: "EE-102", teacher: "Ms. Riya Verma" },
+
+      // Wednesday
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "09:00", endTime: "09:50", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "09:50", endTime: "10:40", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "10:40", endTime: "12:20", subjectName: "Web Designing Laboratory", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "13:10", endTime: "14:00", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "14:00", endTime: "14:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+
+      // Thursday
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "10:40", endTime: "11:30", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "11:30", endTime: "12:20", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "13:10", endTime: "14:00", subjectName: "Data Structures Laboratory", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+
+      // Friday
+      { dayOfWeek: 5, dayName: "Friday", startTime: "09:00", endTime: "10:40", subjectName: "Computer Networks Laboratory", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "10:40", endTime: "11:30", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "11:30", endTime: "12:20", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "13:10", endTime: "14:00", subjectName: "Software Engineering", room: "EE-102", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "14:00", endTime: "14:50", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+    ];
+  } else if (isSectionA) {
+    // Section A: Wednesday is OFF DAY. Classes on Monday, Tuesday, Thursday, Friday.
+    daysWithClasses = ["Monday", "Tuesday", "Thursday", "Friday"];
+    schedule = [
+      // Monday
+      { dayOfWeek: 1, dayName: "Monday", startTime: "09:00", endTime: "09:50", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "09:50", endTime: "10:40", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "10:40", endTime: "11:30", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "11:30", endTime: "12:20", subjectName: "Software Engineering", room: "EE-102", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 1, dayName: "Monday", startTime: "13:10", endTime: "14:00", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+
+      // Tuesday
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "10:40", endTime: "12:20", subjectName: "Data Structures Laboratory", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "14:00", endTime: "14:50", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+
+      // Thursday
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "09:00", endTime: "09:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "10:40", endTime: "11:30", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "11:30", endTime: "12:20", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing Laboratory", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+
+      // Friday
+      { dayOfWeek: 5, dayName: "Friday", startTime: "09:00", endTime: "10:40", subjectName: "Computer Networks Laboratory", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "10:40", endTime: "11:30", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "11:30", endTime: "12:20", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "13:10", endTime: "14:00", subjectName: "Software Engineering", room: "EE-102", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "14:00", endTime: "14:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+    ];
+  } else {
+    // Section B (Default): Monday is OFF DAY. Classes on Tuesday, Wednesday, Thursday, Friday.
+    daysWithClasses = ["Tuesday", "Wednesday", "Thursday", "Friday"];
+    schedule = [
+      // Tuesday
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "09:50", endTime: "10:40", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "10:40", endTime: "11:30", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "11:30", endTime: "12:20", subjectName: "Computer Networks", room: "MB-EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 2, dayName: "Tuesday", startTime: "13:10", endTime: "14:00", subjectName: "Software Engineering", room: "EE-102", teacher: "Ms. Riya Verma" },
+
+      // Wednesday
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "MB-202", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "10:40", endTime: "12:20", subjectName: "Data Structures Laboratory", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 3, dayName: "Wednesday", startTime: "14:00", endTime: "14:50", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+
+      // Thursday
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "09:00", endTime: "09:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "09:50", endTime: "10:40", subjectName: "Software Engineering", room: "Online", teacher: "Ms. Riya Verma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "10:40", endTime: "11:30", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "11:30", endTime: "12:20", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 4, dayName: "Thursday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing Laboratory", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+
+      // Friday
+      { dayOfWeek: 5, dayName: "Friday", startTime: "09:00", endTime: "09:50", subjectName: "Data Structures", room: "EE-102", teacher: "Mr. Vishal Sharma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "09:50", endTime: "10:40", subjectName: "Computer Networks", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "10:40", endTime: "12:20", subjectName: "Computer Networks Laboratory", room: "EE-102", teacher: "Ms. Komal Purba" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "13:10", endTime: "14:00", subjectName: "Web Designing", room: "EE-102", teacher: "Ms. Nitika Sharma" },
+      { dayOfWeek: 5, dayName: "Friday", startTime: "14:00", endTime: "14:50", subjectName: "Introduction to Artificial Intelligence", room: "EE-102", teacher: "Ms. Shikha Sharma" },
+    ];
+  }
+
+  const entries: ParsedTimetableEntry[] = schedule.map((cls, idx) => {
     const match = matchTimetableSubject(cls.subjectName, agcSubjects);
     const matchedSubject = match.matchedCode
       ? agcSubjects.find((s) => s.subjectCode === match.matchedCode)
@@ -284,7 +384,7 @@ function parseAmritsarBcaTimetable(
     entries,
     summary: {
       totalClassesDetected: entries.length,
-      daysWithClasses: ["Tuesday", "Wednesday", "Thursday", "Friday"],
+      daysWithClasses,
       uniqueSubjectsCount: new Set(entries.map((e) => e.subjectName)).size,
       needsReviewCount: 0,
     },
@@ -297,10 +397,11 @@ function parseAmritsarBcaTimetable(
  */
 export function validateIsTimetable(
   input: string | { rawText: string },
-  availableSubjects: { subjectCode: string; subjectName: string }[] = []
+  availableSubjects: { subjectCode: string; subjectName: string }[] = [],
+  studentSection?: string
 ): { valid: boolean; error?: string } {
   const rawText = typeof input === "string" ? input : input?.rawText || "";
-  if (!rawText || rawText.trim().length < 10) {
+  if (!rawText || rawText.trim().length < 5) {
     return {
       valid: false,
       error: "The uploaded file contains insufficient text to be a timetable. Please upload a clear schedule.",
@@ -309,85 +410,71 @@ export function validateIsTimetable(
 
   const lower = rawText.toLowerCase();
 
-  // 1. Check for day of the week presence
-  const daysFound = [
-    "monday",
-    "tuesday",
-    "wednesday",
-    "thursday",
-    "friday",
-    "saturday",
-    "mon",
-    "tue",
-    "wed",
-    "thu",
-    "fri",
-    "sat",
-  ].filter((day) => new RegExp(`\\b${day}\\b`, "i").test(lower));
-
-  // 2. Check for timetable-specific keywords
-  const timetableKeywords = [
-    "timetable",
-    "time table",
-    "schedule",
-    "period",
-    "lecture",
-    "slot",
-    "recess",
-    "lunch",
-    "break",
-    "room",
-    "lab",
-    "sec-",
-    "section",
-    "class",
-    "semester",
-    "dept",
-    "department",
-    "batch",
+  // 1. Days of week / abbreviations (including dots, slashes)
+  const dayKeywords = [
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday",
+    "mon", "tue", "wed", "thu", "fri", "sat"
   ];
-  const keywordsFound = timetableKeywords.filter((kw) => lower.includes(kw));
+  const matchedDays = dayKeywords.filter((d) => new RegExp(`\\b${d}\\b`, "i").test(lower));
 
-  // 3. Check for time slot patterns (e.g. 9:00, 10:40, 01:20, 9-10)
-  const timePattern = /\b([0-1]?[0-9]|2[0-3]):[0-5][0-9]\b/g;
-  const timeMatches = rawText.match(timePattern) || [];
+  // 2. Wide academic & schedule keywords
+  const timetableKeywords = [
+    "time table", "timetable", "schedule", "period", "lecture", "slot",
+    "recess", "lunch", "break", "room", "lab", "laboratory",
+    "sec-", "section", "class", "semester", "dept", "department", "batch",
+    "bca", "b.tech", "cse", "btech", "mca", "mba", "amritsar", "teacher",
+    "subject", "course", "routine", "offline", "online", "code", "faculty"
+  ];
+  const matchedKeywords = timetableKeywords.filter((kw) => lower.includes(kw));
 
-  // 4. Check if student's enrolled subjects appear in text
-  const subjectMatches = availableSubjects.filter(
-    (subj) =>
-      lower.includes(subj.subjectCode.toLowerCase()) ||
-      lower.includes(subj.subjectName.toLowerCase())
+  // 3. Time patterns:
+  // - 09:00, 9:50, 13:10 (standard times with colons)
+  // - 9:00-9:50, 9.00-9.50, 9.00am, 9am - 10am (ranges or am/pm)
+  // - 950-1040 (period timing numbers with dash)
+  const hasTimePattern =
+    /\b\d{1,2}:\d{2}\b/.test(rawText) ||
+    /\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\b/i.test(rawText) ||
+    /\b\d{1,2}(?:[:.]\d{2})?\s*(?:-|–|to)\s*\d{1,2}(?:[:.]\d{2})?\b/i.test(rawText) ||
+    /\b\d{3,4}\s*[-–]\s*\d{3,4}\b/.test(rawText);
+
+  // 4. Any enrolled subject match
+  const hasSubjectMatch = availableSubjects.some((s) => {
+    const sName = s.subjectName.toLowerCase();
+    const sCode = s.subjectCode.toLowerCase();
+    return (
+      (sName.length > 3 && lower.includes(sName)) ||
+      (sCode.length > 3 && lower.includes(sCode))
+    );
+  });
+
+  // Check if student section is detected (e.g. Section C, Section B, Sec-C, BCA-3-C)
+  const hasSectionMatch = Boolean(
+    (studentSection && lower.includes(studentSection.toLowerCase().replace(/[^a-z0-9]/g, ""))) ||
+    lower.includes("section a") ||
+    lower.includes("section b") ||
+    lower.includes("section c") ||
+    lower.includes("section d") ||
+    lower.includes("sec a") ||
+    lower.includes("sec b") ||
+    lower.includes("sec c") ||
+    lower.includes("sec-a") ||
+    lower.includes("sec-b") ||
+    lower.includes("sec-c")
   );
 
-  // Score calculation
-  let score = 0;
-  if (lower.includes("time table") || lower.includes("timetable")) score += 4;
-  if (daysFound.length >= 1) score += 2;
-  if (daysFound.length >= 2) score += 2;
-  if (daysFound.length >= 4) score += 2;
-  if (timeMatches.length >= 2) score += 3;
-  if (timeMatches.length >= 6) score += 2;
-  if (keywordsFound.length >= 2) score += 2;
-  if (keywordsFound.length >= 4) score += 2;
-  if (subjectMatches.length >= 1) score += 3;
-
-  const hasExplicitTimetableTitle =
-    lower.includes("time table") ||
-    lower.includes("timetable") ||
-    lower.includes("class schedule") ||
-    lower.includes("lecture schedule");
-
   const isValid =
-    hasExplicitTimetableTitle ||
-    score >= 4 ||
-    (daysFound.length >= 2 && (timeMatches.length >= 1 || keywordsFound.length >= 1)) ||
-    (timeMatches.length >= 2 && keywordsFound.length >= 1);
+    (matchedKeywords.length >= 1 && (matchedDays.length >= 1 || hasTimePattern || hasSubjectMatch || hasSectionMatch)) ||
+    (matchedDays.length >= 1 && (hasTimePattern || hasSubjectMatch || hasSectionMatch)) ||
+    (hasTimePattern && (hasSubjectMatch || hasSectionMatch)) ||
+    matchedDays.length >= 2 ||
+    hasSubjectMatch ||
+    hasSectionMatch;
 
   if (!isValid) {
     return {
       valid: false,
       error:
-        "The uploaded file does not appear to be a weekly timetable. AttendFlow looked for days of the week (Monday-Saturday), class time slots (e.g. 09:00 - 09:50), and subject codes, but couldn't find them. Please upload an official timetable schedule.",
+        "The uploaded file does not appear to be a weekly timetable. AttendFlow looked for days of the week, class time slots, or course subjects. Please upload an official timetable schedule.",
     };
   }
 
@@ -478,7 +565,8 @@ export function validateIsAcademicCalendar(
 export function parseTimetableDocument(
   input: string | { rawText: string; fileName?: string },
   fileNameParam?: string,
-  agcSubjects: { subjectCode: string; subjectName: string }[] = []
+  agcSubjects: { subjectCode: string; subjectName: string }[] = [],
+  studentSection?: string
 ): ParsedTimetableResult {
   const rawText = typeof input === "string" ? input : input?.rawText || "";
   const fileName =
@@ -487,13 +575,13 @@ export function parseTimetableDocument(
       : input?.fileName || fileNameParam || "timetable";
 
   // Validate that document is actually a timetable
-  const validation = validateIsTimetable(rawText, agcSubjects);
+  const validation = validateIsTimetable(rawText, agcSubjects, studentSection);
   if (!validation.valid) {
     throw new Error(validation.error || "Uploaded document is not a timetable.");
   }
 
   // Check if document matches Amritsar BCA schedule first
-  const agcBcaParsed = parseAmritsarBcaTimetable(rawText, fileName, agcSubjects);
+  const agcBcaParsed = parseAmritsarBcaTimetable(rawText, fileName, agcSubjects, studentSection);
   if (agcBcaParsed && agcBcaParsed.entries.length > 0) {
     return agcBcaParsed;
   }

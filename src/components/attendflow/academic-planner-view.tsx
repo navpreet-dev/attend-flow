@@ -93,6 +93,12 @@ export function AcademicPlannerView({
     fileName: string;
     entries: ParsedTimetableEntry[];
     extractedVia: string;
+    summary?: {
+      totalClassesDetected: number;
+      daysWithClasses: string[];
+      uniqueSubjectsCount: number;
+      needsReviewCount: number;
+    };
   } | null>(null);
 
   const [reviewCalendar, setReviewCalendar] = useState<{
@@ -159,7 +165,7 @@ export function AcademicPlannerView({
         img.onload = () => {
           URL.revokeObjectURL(objectUrl);
           try {
-            const MAX_DIM = 1400;
+            const MAX_DIM = 900;
             let { width, height } = img;
             if (width > MAX_DIM || height > MAX_DIM) {
               if (width > height) {
@@ -188,7 +194,7 @@ export function AcademicPlannerView({
                   resolve(compressed);
                 },
                 "image/jpeg",
-                0.82
+                0.78
               );
             } else {
               resolve(file);
@@ -227,7 +233,7 @@ export function AcademicPlannerView({
         setUploadStepMessage("Scanning timetable structure & matching subjects...");
       }, 900);
 
-      // Client watchdog timeout of 20 seconds to prevent any infinite spinner
+      // Client watchdog timeout of 25 seconds to prevent any infinite spinner
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
           () =>
@@ -236,7 +242,7 @@ export function AcademicPlannerView({
                 "Document processing took too long. Please ensure you have a stable network or upload a PDF format."
               )
             ),
-          20000
+          25000
         )
       );
 
@@ -250,6 +256,7 @@ export function AcademicPlannerView({
           fileName: rawFile.name,
           entries: response.result.entries,
           extractedVia: response.extractedVia,
+          summary: response.result.summary,
         });
         toast.success(
           `Detected ${response.result.entries.length} classes from ${rawFile.name}!`
@@ -770,10 +777,15 @@ export function AcademicPlannerView({
       <Dialog open={Boolean(reviewTimetable)} onOpenChange={(open) => !open && setReviewTimetable(null)}>
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-6 overflow-hidden">
           <DialogHeader className="space-y-1 shrink-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary text-xs">
                 Auto-Detected ({reviewTimetable?.entries.length || 0} classes)
               </Badge>
+              {reviewTimetable?.summary?.daysWithClasses && (
+                <Badge variant="secondary" className="text-xs font-medium">
+                  Active: {reviewTimetable.summary.daysWithClasses.join(", ")}
+                </Badge>
+              )}
               <span className="text-xs text-muted-foreground truncate">{reviewTimetable?.fileName}</span>
             </div>
             <DialogTitle className="text-xl">Review Detected Timetable</DialogTitle>

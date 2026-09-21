@@ -78,7 +78,8 @@ export async function POST(req: NextRequest) {
         parsedTimetable = parseTimetableDocument(
           extracted.rawText,
           file.name,
-          studentSubjects
+          studentSubjects,
+          student.section || undefined
         );
       } catch (valErr) {
         return NextResponse.json(

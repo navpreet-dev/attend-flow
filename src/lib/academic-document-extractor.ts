@@ -243,10 +243,29 @@ export async function extractDocumentContent(
 
       const workerOptions: Record<string, any> = {};
       if (isServerless) {
-        // On Vercel / AWS Lambda, process.cwd() is read-only (/var/task).
-        // Tesseract MUST cache downloaded language data in /tmp to prevent EROFS errors or hangs.
         workerOptions.cachePath = "/tmp";
         workerOptions.dataPath = "/tmp";
+      }
+
+      // Check for pre-bundled local traineddata to eliminate internet download delays on Vercel
+      const localTessDir = path.join(process.cwd(), "public", "tessdata");
+      const localTessGz = path.join(localTessDir, "eng.traineddata.gz");
+
+      if (fs.existsSync(localTessGz)) {
+        if (isServerless) {
+          const tmpGz = path.join("/tmp", "eng.traineddata.gz");
+          if (!fs.existsSync(tmpGz)) {
+            try {
+              fs.copyFileSync(localTessGz, tmpGz);
+            } catch {
+              // Ignore copy error
+            }
+          }
+          workerOptions.langPath = "/tmp";
+        } else {
+          workerOptions.langPath = localTessDir;
+        }
+        workerOptions.gzip = true;
       }
 
       try {
@@ -268,8 +287,8 @@ export async function extractDocumentContent(
 
       const worker = await createWorker("eng", 1, workerOptions);
 
-      // Enforce timeout (14s serverless, 20s local)
-      const timeoutMs = isServerless ? 14000 : 20000;
+      // Enforce timeout (8.5s serverless to stay inside Vercel's 10s ceiling, 15s local)
+      const timeoutMs = isServerless ? 8500 : 15000;
       const ocrTimeout = new Promise<never>((_, reject) =>
         setTimeout(
           () =>

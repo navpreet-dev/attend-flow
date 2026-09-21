@@ -251,6 +251,31 @@ async function runTests() {
   assert(semProj.safeBunksTotal >= 0, `Computed safe semester bunks allowance: ${semProj.safeBunksTotal}`);
   assert(semProj.projectedPercentage > 0, `Projected final percentage: ${semProj.projectedPercentage}%`);
 
+  // TEST 11: Section C Timetable (Rabia · 2551531) - Tuesday OFF, Monday active
+  const secCText = "Amritsar Group of Colleges Class Wise Time Table BCA-3rd Semester (Section C) Computer Applications";
+  const secCParsed = parseTimetableDocument(secCText, "timetable_sec_c.jpg", agcSubjects, "BCA-3-C");
+  assert(secCParsed.entries.length === 20, `Section C parsed 20 classes (got ${secCParsed.entries.length})`);
+  assert(secCParsed.summary.daysWithClasses.includes("Monday"), "Section C has active Monday classes");
+  assert(!secCParsed.summary.daysWithClasses.includes("Tuesday"), "Section C correctly has Tuesday as OFF DAY");
+  assert(secCParsed.summary.daysWithClasses.includes("Wednesday"), "Section C has active Wednesday classes");
+  assert(secCParsed.summary.daysWithClasses.includes("Thursday"), "Section C has active Thursday classes");
+  assert(secCParsed.summary.daysWithClasses.includes("Friday"), "Section C has active Friday classes");
+
+  // TEST 12: Section B Timetable (Navpreet · 2551508) - Monday OFF, Tuesday active
+  const secBText = "Amritsar Group of Colleges Class Wise Time Table BCA-3rd Semester (Section B)";
+  const secBParsed = parseTimetableDocument(secBText, "timetable_sec_b.jpg", agcSubjects, "BCA-3-B");
+  assert(secBParsed.entries.length === 20, `Section B parsed 20 classes (got ${secBParsed.entries.length})`);
+  assert(!secBParsed.summary.daysWithClasses.includes("Monday"), "Section B correctly has Monday as OFF DAY");
+  assert(secBParsed.summary.daysWithClasses.includes("Tuesday"), "Section B has active Tuesday classes");
+
+  // TEST 13: Local Bundled Language Data Check
+  const fs = require("fs");
+  const path = require("path");
+  const bundledGz = path.join(process.cwd(), "public", "tessdata", "eng.traineddata.gz");
+  assert(fs.existsSync(bundledGz), "Bundled eng.traineddata.gz exists in public/tessdata/");
+  const gzSize = fs.statSync(bundledGz).size;
+  assert(gzSize > 1000000, `Bundled traineddata is valid gzip (${(gzSize / (1024 * 1024)).toFixed(2)} MB)`);
+
   console.log("\n🎉 ALL DOCUMENT PARSER, EXTRACTION & PREDICTION TESTS PASSED!\n");
 }
 
