@@ -38,6 +38,10 @@ model Student {
   logs       AttendanceLog[]
   syncEvents SyncEvent[]
   pushSubs   PushSubscription[]
+
+  // Optional Academic Planner & Timetable
+  academicCalendar AcademicCalendar?
+  timetableEntries TimetableEntry[]
 }
 
 model Session {
@@ -105,3 +109,49 @@ model PushSubscription {
 
   @@index([studentId])
 }
+
+// Optional Academic Calendar configured by the student
+model AcademicCalendar {
+  id          String   @id @default(cuid())
+  studentId   String   @unique
+  startDate   String   // YYYY-MM-DD
+  endDate     String   // YYYY-MM-DD
+  workingDays String   @default("1,2,3,4,5") // comma-separated: 1=Mon...7=Sun
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  holidays AcademicHoliday[]
+}
+
+model AcademicHoliday {
+  id         String           @id @default(cuid())
+  calendarId String
+  date       String           // YYYY-MM-DD
+  name       String?
+  createdAt  DateTime         @default(now())
+  calendar   AcademicCalendar @relation(fields: [calendarId], references: [id], onDelete: Cascade)
+
+  @@unique([calendarId, date])
+  @@index([calendarId])
+}
+
+// Optional Weekly Timetable configured by the student
+model TimetableEntry {
+  id                 String   @id @default(cuid())
+  studentId          String
+  dayOfWeek          Int      // 1 = Monday ... 7 = Sunday
+  subjectCode        String
+  subjectName        String
+  startTime          String   // HH:mm
+  endTime            String   // HH:mm
+  room               String?
+  teacher            String?
+  matchedSubjectCode String?  // Matched AttendFlow portal subjectCode
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  student            Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+}
+

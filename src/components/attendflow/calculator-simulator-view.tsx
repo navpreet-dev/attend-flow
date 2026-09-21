@@ -38,17 +38,22 @@ import {
 import type { DashboardPayload, SubjectInfo } from "@/lib/types";
 import { overallStats } from "@/lib/af-client";
 import { calculateRecovery, simulateAttendance } from "@/lib/attendance-calculator";
+import { Clock } from "lucide-react";
+import type { PlannerState } from "@/lib/academic-planner-client";
+import { calculateSubjectScheduleMetrics } from "@/lib/academic-planner";
 
 interface CalculatorSimulatorViewProps {
   data: DashboardPayload;
   threshold: number;
   initialSelectedSubjectCode?: string | null;
+  plannerState?: PlannerState | null;
 }
 
 export function CalculatorSimulatorView({
   data,
   threshold,
   initialSelectedSubjectCode,
+  plannerState,
 }: CalculatorSimulatorViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<"simulator" | "recovery">("simulator");
   const [selectedSubjectCode, setSelectedSubjectCode] = useState<string>(
@@ -81,6 +86,28 @@ export function CalculatorSimulatorView({
   useEffect(() => {
     setTargetPercentage(threshold);
   }, [threshold]);
+
+  // Derive timetable schedule metrics for currently selected subject if planner configured
+  const timetableMetrics = useMemo(() => {
+    if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
+      return null;
+    }
+    if (selectedSubjectCode === "OVERALL" || selectedSubjectCode === "CUSTOM") {
+      return null;
+    }
+    return calculateSubjectScheduleMetrics(
+      selectedSubjectCode,
+      plannerState.calendar,
+      plannerState.timetable
+    );
+  }, [plannerState, selectedSubjectCode]);
+
+  // When subject changes, prefill remaining classes if timetable metrics are available
+  useEffect(() => {
+    if (timetableMetrics && timetableMetrics.scheduledRemaining > 0) {
+      setRemainingClassesInput(String(timetableMetrics.scheduledRemaining));
+    }
+  }, [timetableMetrics]);
 
   // Resolve currently active subject data
   const currentSubjectInfo = useMemo(() => {
@@ -574,6 +601,15 @@ export function CalculatorSimulatorView({
                             </>
                           )}
                         </p>
+                        {timetableMetrics && timetableMetrics.scheduledRemaining > 0 && (
+                          <p className="mt-2 text-xs border-t border-current/15 pt-2 opacity-95">
+                            <strong>Timetable context:</strong> Based on your schedule, there are{" "}
+                            {timetableMetrics.scheduledRemaining} classes remaining for this subject.
+                            After this simulated scenario ({attendMore + bunkMore} classes),{" "}
+                            {Math.max(0, timetableMetrics.scheduledRemaining - attendMore - bunkMore)} scheduled
+                            classes will remain.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -641,6 +677,26 @@ export function CalculatorSimulatorView({
                         Optional
                       </Badge>
                     </div>
+                    {timetableMetrics && timetableMetrics.scheduledRemaining > 0 && (
+                      <div className="flex items-center justify-between rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-800 dark:text-emerald-300">
+                        <span className="flex items-center gap-1.5">
+                          <Clock className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            Timetable: <strong>{timetableMetrics.scheduledRemaining}</strong> classes remain
+                            {timetableMetrics.upcomingThisWeek.length > 0
+                              ? ` (${timetableMetrics.upcomingThisWeek.length} this week)`
+                              : ""}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setRemainingClassesInput(String(timetableMetrics.scheduledRemaining))}
+                          className="text-[11px] underline font-semibold hover:opacity-80"
+                        >
+                          Auto-fill
+                        </button>
+                      </div>
+                    )}
                     <Input
                       id="remaining-classes"
                       type="number"

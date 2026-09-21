@@ -38,12 +38,14 @@ export function SubjectCard({
   threshold,
   index,
   onOpenSimulator,
+  scheduledRemaining,
 }: {
   subject: SubjectInfo;
   data: DashboardPayload;
   threshold: number;
   index: number;
   onOpenSimulator?: (code: string) => void;
+  scheduledRemaining?: number;
 }) {
   const level = pctColor(subject.percentage, threshold);
   const c = COLOR[level];
@@ -103,11 +105,17 @@ export function SubjectCard({
               <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
                 <TrendingUp className="h-3 w-3" aria-hidden="true" />
                 Attend {need} in a row to reach {threshold}%
+                {typeof scheduledRemaining === "number" && scheduledRemaining > 0
+                  ? ` · ${scheduledRemaining} scheduled classes remain`
+                  : ""}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 rounded-md border border-emerald-600/25 bg-emerald-600/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">
                 <SkipForward className="h-3 w-3" aria-hidden="true" />
                 Can skip {skip} and stay ≥ {threshold}%
+                {typeof scheduledRemaining === "number" && scheduledRemaining > 0
+                  ? ` · ${scheduledRemaining} scheduled classes remain`
+                  : ""}
               </span>
             )}
           </div>

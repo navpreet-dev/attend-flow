@@ -51,6 +51,7 @@ import {
   Sparkles,
   TrendingUp,
   WifiOff,
+  CalendarDays,
 } from "lucide-react";
 import type { DashboardPayload } from "@/lib/types";
 import {
@@ -68,10 +69,17 @@ import { ThemeToggle } from "./theme-toggle";
 import { SubjectCard } from "./subject-card";
 import { TrendsCharts } from "./trends-chart";
 import { CalculatorSimulatorView } from "./calculator-simulator-view";
+import { AcademicPlannerView } from "./academic-planner-view";
 import { NotificationsPopover } from "./notifications-popover";
 import { SyncSummaryDialog } from "./sync-summary-dialog";
 import { generateSyncSummary, type SyncSummary } from "@/lib/sync-summary";
 import { enablePushAlerts, disablePushAlerts, registerServiceWorker } from "@/lib/push-client";
+import { apiGetPlanner, type PlannerState } from "@/lib/academic-planner-client";
+import {
+  calculateSubjectScheduleMetrics,
+  generateScheduledClasses,
+  toDateString,
+} from "@/lib/academic-planner";
 
 interface DashboardViewProps {
   data: DashboardPayload;
@@ -88,7 +96,21 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
   const [syncSummary, setSyncSummary] = useState<SyncSummary | null>(null);
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   const [prevData, setPrevData] = useState<DashboardPayload | null>(null);
+  const [plannerState, setPlannerState] = useState<PlannerState | null>(null);
   const notifiedRef = useRef<string>("");
+
+  const loadPlanner = useCallback(async () => {
+    try {
+      const res = await apiGetPlanner();
+      setPlannerState(res);
+    } catch {
+      // Ignore planner load errors (optional feature)
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPlanner();
+  }, [loadPlanner]);
 
   const threshold = data.settings.threshold;
   const overall = useMemo(() => overallStats(data.subjects), [data.subjects]);
@@ -99,6 +121,36 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
         .sort((a, b) => a.percentage - b.percentage),
     [data.subjects, threshold]
   );
+
+  // Map scheduled remaining classes per subject if planner is configured
+  const scheduledRemainingMap = useMemo(() => {
+    if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
+      return {} as Record<string, number>;
+    }
+    const map: Record<string, number> = {};
+    for (const s of data.subjects) {
+      const m = calculateSubjectScheduleMetrics(s.subjectCode, plannerState.calendar, plannerState.timetable);
+      map[s.subjectCode] = m.scheduledRemaining;
+    }
+    return map;
+  }, [plannerState, data.subjects]);
+
+  // Today and Tomorrow upcoming classes preview
+  const { todayClasses, tomorrowClasses } = useMemo(() => {
+    if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
+      return { todayClasses: [], tomorrowClasses: [] };
+    }
+    const today = new Date();
+    const todayStr = toDateString(today);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = toDateString(tomorrow);
+
+    const all = generateScheduledClasses(plannerState.calendar, plannerState.timetable, today);
+    const todayClasses = all.filter((c) => c.date === todayStr);
+    const tomorrowClasses = all.filter((c) => c.date === tomorrowStr);
+    return { todayClasses, tomorrowClasses };
+  }, [plannerState]);
 
   const runSync = useCallback(
     async (silent = false) => {
@@ -480,6 +532,12 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             <TabsTrigger value="history" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <History className="h-4 w-4" aria-hidden="true" /> History
             </TabsTrigger>
+            <TabsTrigger value="planner" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
+              <CalendarDays className="h-4 w-4" aria-hidden="true" /> Academic Planner
+              {plannerState?.configured && (
+                <span className="ml-1 h-2 w-2 rounded-full bg-emerald-500" title="Timetable Active" />
+              )}
+            </TabsTrigger>
             <TabsTrigger value="settings" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
               <Settings2 className="h-4 w-4" aria-hidden="true" /> Settings
             </TabsTrigger>
@@ -487,6 +545,65 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
           {/* Overview */}
           <TabsContent value="overview" className="mt-0 space-y-4">
+            {/* Upcoming Classes Preview (Timetable) */}
+            {(todayClasses.length > 0 || tomorrowClasses.length > 0) && (
+              <div className="card-premium rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/[0.04] to-teal-500/[0.04] p-4 sm:p-5">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center gap-2">
+                    <CalendarDays className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Upcoming Classes (Timetable)</h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("planner")}
+                    className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline"
+                  >
+                    View Timetable →
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="rounded-xl border border-border/60 bg-card/60 p-3">
+                    <p className="font-semibold text-muted-foreground mb-1.5 text-[11px] uppercase tracking-wider">Today</p>
+                    {todayClasses.length === 0 ? (
+                      <p className="text-muted-foreground italic">No classes scheduled today.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {todayClasses.map((c, i) => (
+                          <div key={i} className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-foreground truncate" title={c.subjectName}>
+                              {c.subjectName}
+                            </span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] shrink-0">
+                              {c.startTime}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl border border-border/60 bg-card/60 p-3">
+                    <p className="font-semibold text-muted-foreground mb-1.5 text-[11px] uppercase tracking-wider">Tomorrow</p>
+                    {tomorrowClasses.length === 0 ? (
+                      <p className="text-muted-foreground italic">No classes scheduled tomorrow.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {tomorrowClasses.map((c, i) => (
+                          <div key={i} className="flex items-center justify-between gap-2">
+                            <span className="font-medium text-foreground truncate" title={c.subjectName}>
+                              {c.subjectName}
+                            </span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] shrink-0">
+                              {c.startTime}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-display text-lg font-semibold tracking-tight">Subject-wise attendance</h2>
               <p className="text-xs text-muted-foreground">
@@ -508,6 +625,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                     data={data}
                     threshold={threshold}
                     index={i}
+                    scheduledRemaining={scheduledRemainingMap[s.subjectCode]}
                     onOpenSimulator={(code) => {
                       setSelectedToolSubject(code);
                       setActiveTab("tools");
@@ -524,6 +642,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
               data={data}
               threshold={threshold}
               initialSelectedSubjectCode={selectedToolSubject}
+              plannerState={plannerState}
             />
           </TabsContent>
 
@@ -743,6 +862,11 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* Academic Planner */}
+          <TabsContent value="planner" className="mt-0">
+            <AcademicPlannerView data={data} onPlannerUpdated={loadPlanner} />
           </TabsContent>
         </Tabs>
 
