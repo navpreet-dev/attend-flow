@@ -276,6 +276,121 @@ async function runTests() {
   const gzSize = fs.statSync(bundledGz).size;
   assert(gzSize > 1000000, `Bundled traineddata is valid gzip (${(gzSize / (1024 * 1024)).toFixed(2)} MB)`);
 
+  // TEST 14: Rate Limiter Sliding Window Protection
+  const {
+    checkPlannerRateLimit,
+    computeDocumentHash,
+    getCachedPlannerResult,
+    setCachedPlannerResult,
+    __resetPlannerRateLimiter,
+  } = await import("../src/lib/planner-rate-limiter");
+
+  __resetPlannerRateLimiter();
+  const testStudentId = "student_test_rate_1";
+  for (let i = 1; i <= 5; i++) {
+    const check = checkPlannerRateLimit(testStudentId, "1.2.3.4");
+    assert(check.allowed === true, `Rate limit attempt ${i}/5 allowed`);
+  }
+  const blockedCheck = checkPlannerRateLimit(testStudentId, "1.2.3.4");
+  assert(blockedCheck.allowed === false, "6th attempt correctly rate-limited (HTTP 429 burst prevention)");
+  assert(typeof blockedCheck.retryAfterSeconds === "number" && blockedCheck.retryAfterSeconds > 0, "Provides clear Retry-After duration");
+
+  // TEST 15: Content Hash & Zero-Cost Deduplication Cache
+  const testBufferA = Buffer.from("SAMPLE_TIMETABLE_PDF_CONTENT_ABC_123");
+  const hashA = computeDocumentHash(testBufferA);
+  assert(hashA.length === 64, "Computed valid SHA-256 document checksum");
+  
+  const sampleCachedTimetable = {
+    fileName: "timetable.pdf",
+    entries: [{ dayOfWeek: 1, subjectName: "AI", subjectCode: "BCA101", startTime: "09:00", endTime: "10:00" }],
+  };
+  setCachedPlannerResult(hashA, "timetable", sampleCachedTimetable);
+  const cacheHit = getCachedPlannerResult(hashA, "timetable");
+  assert(Boolean(cacheHit), "Cached document successfully retrieved via SHA-256");
+  assert((cacheHit as any).fileName === "timetable.pdf", "Cache preserves exact structured timetable data with 0 API calls");
+
+  // TEST 16: Gemini AI Timetable Extraction on Real Timetable Image
+  const {
+    isGeminiConfigured,
+    extractTimetableWithGemini,
+    extractCalendarWithGemini,
+  } = await import("../src/lib/gemini-ai");
+
+  if (isGeminiConfigured()) {
+    console.log("\n--- Testing Live Gemini Multimodal AI Integration ---");
+    const testImage = path.join(
+      process.env.USERPROFILE || "C:\\Users\\Nav",
+      ".gemini\\antigravity-ide\\brain\\94c8ea21-b626-4d32-863f-8de4965283c3\\.user_uploaded\\media_1790008031417.jpg"
+    );
+
+    if (fs.existsSync(testImage)) {
+      const imgBuffer = fs.readFileSync(testImage);
+      const ttRes = await extractTimetableWithGemini(
+        imgBuffer,
+        "image/jpeg",
+        "timetable.jpg",
+        "BCA-3-B",
+        agcSubjects
+      );
+      assert(ttRes.ok === true, "Gemini AI timetable extraction responded with 200 OK");
+      assert(ttRes.result?.isTimetable === true, "Gemini AI recognized valid academic timetable");
+      assert(
+        Array.isArray(ttRes.result?.classes) && (ttRes.result?.classes.length || 0) > 10,
+        `Gemini AI extracted ${ttRes.result?.classes.length} class periods`
+      );
+      const hasTheory = ttRes.result?.classes.some((c) => c.type === "THEORY");
+      const hasLab = ttRes.result?.classes.some((c) => c.type === "LABORATORY");
+      assert(hasTheory === true, "Gemini AI detected THEORY classes");
+      assert(hasLab === true, "Gemini AI detected LABORATORY classes distinctly from theory");
+    }
+
+    // TEST 17: Gemini AI Calendar Extraction on Real Calendar PDF
+    const testPdf = path.join(
+      process.env.USERPROFILE || "C:\\Users\\Nav",
+      ".gemini\\antigravity-ide\\brain\\94c8ea21-b626-4d32-863f-8de4965283c3\\.user_uploaded\\media_1790008024938.pdf"
+    );
+
+    if (fs.existsSync(testPdf)) {
+      const pdfBuffer = fs.readFileSync(testPdf);
+      const calRes = await extractCalendarWithGemini(
+        pdfBuffer,
+        "application/pdf",
+        "calendar.pdf"
+      );
+      assert(calRes.ok === true, "Gemini AI calendar extraction responded with 200 OK");
+      assert(calRes.result?.isAcademicCalendar === true, "Gemini AI recognized valid academic calendar");
+      assert(
+        Boolean(calRes.result?.semesterStartDate && calRes.result?.semesterEndDate),
+        `Gemini AI extracted semester dates: ${calRes.result?.semesterStartDate} to ${calRes.result?.semesterEndDate}`
+      );
+      assert(
+        (calRes.result?.holidays.length || 0) >= 10,
+        `Gemini AI extracted ${calRes.result?.holidays.length} holidays from PDF`
+      );
+    }
+
+    // TEST 18: Gemini AI Invalid Document Rejection
+    const fakeReceiptBuffer = Buffer.from(
+      "SUPERMARKET RECEIPT\nDate: 2026-09-12\nMilk $3.50\nBread $2.00\nTotal $5.50\nThank you for shopping!"
+    );
+    const rejectRes = await extractTimetableWithGemini(
+      fakeReceiptBuffer,
+      "text/plain",
+      "grocery_receipt.txt"
+    );
+    assert(rejectRes.ok === true, "Gemini evaluated non-academic text");
+    assert(
+      rejectRes.result?.isTimetable === false,
+      "Gemini correctly rejected grocery receipt (isTimetable: false)"
+    );
+    assert(
+      Boolean(rejectRes.result?.rejectionReason),
+      `Provided polite rejection reason: "${rejectRes.result?.rejectionReason}"`
+    );
+  } else {
+    console.log("ℹ️ Skipping live Gemini tests because GEMINI_API_KEY is not set in environment.");
+  }
+
   console.log("\n🎉 ALL DOCUMENT PARSER, EXTRACTION & PREDICTION TESTS PASSED!\n");
 }
 

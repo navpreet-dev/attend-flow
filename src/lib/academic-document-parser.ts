@@ -21,6 +21,7 @@ export interface ParsedTimetableEntry {
   matchedSubjectName?: string | null;
   matchConfidence: "high" | "medium" | "none";
   needsReview: boolean;
+  classType?: "THEORY" | "LABORATORY";
 }
 
 export interface ParsedTimetableResult {

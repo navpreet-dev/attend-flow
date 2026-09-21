@@ -172,9 +172,34 @@ export async function extractDocumentContent(
       try {
         const base64Data = buffer.toString("base64");
         const imageMime = mimeType || (fileName.endsWith(".png") ? "image/png" : "image/jpeg");
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKey}`,
-          {
+        
+        // Use gemini-3.1-flash-lite (primary) with gemini-3.6-flash fallback
+        let apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${encodeURIComponent(geminiKey)}`;
+        let response = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: "Transcribe all text from this academic timetable or calendar image accurately, preserving table structure, days of week, times, subjects, and dates line by line.",
+                  },
+                  {
+                    inlineData: {
+                      mimeType: imageMime,
+                      data: base64Data,
+                    },
+                  },
+                ],
+              },
+            ],
+          }),
+        });
+
+        if (!response.ok && (response.status === 503 || response.status === 404)) {
+          apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${encodeURIComponent(geminiKey)}`;
+          response = await fetch(apiUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -194,8 +219,8 @@ export async function extractDocumentContent(
                 },
               ],
             }),
-          }
-        );
+          });
+        }
 
         if (response.ok) {
           const json = await response.json();

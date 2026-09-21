@@ -230,8 +230,12 @@ export function AcademicPlannerView({
       const file = await compressImageIfApplicable(rawFile);
 
       timer = setTimeout(() => {
-        setUploadStepMessage("Scanning timetable structure & matching subjects...");
-      }, 900);
+        setUploadStepMessage("Gemini AI analyzing timetable structure & validating schedule...");
+      }, 700);
+
+      const timer2 = setTimeout(() => {
+        setUploadStepMessage("Matching classes with AGC courses...");
+      }, 3200);
 
       // Client watchdog timeout of 25 seconds to prevent any infinite spinner
       const timeoutPromise = new Promise<never>((_, reject) =>
@@ -250,6 +254,7 @@ export function AcademicPlannerView({
         apiUploadPlannerDocument(file, "timetable"),
         timeoutPromise,
       ]);
+      clearTimeout(timer2);
 
       if (response.ok && response.type === "timetable") {
         setReviewTimetable({
@@ -286,8 +291,8 @@ export function AcademicPlannerView({
       const file = await compressImageIfApplicable(rawFile);
 
       timer = setTimeout(() => {
-        setUploadStepMessage("Reading semester dates and detecting holidays...");
-      }, 900);
+        setUploadStepMessage("Gemini AI analyzing calendar, semester bounds & holidays...");
+      }, 700);
 
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(
@@ -781,6 +786,16 @@ export function AcademicPlannerView({
               <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary text-xs">
                 Auto-Detected ({reviewTimetable?.entries.length || 0} classes)
               </Badge>
+              {reviewTimetable?.extractedVia === "gemini-ai" && (
+                <Badge variant="outline" className="border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs">
+                  ✨ Gemini AI
+                </Badge>
+              )}
+              {reviewTimetable?.extractedVia === "gemini-ai-cached" && (
+                <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs">
+                  ⚡ Instant (Cached)
+                </Badge>
+              )}
               {reviewTimetable?.summary?.daysWithClasses && (
                 <Badge variant="secondary" className="text-xs font-medium">
                   Active: {reviewTimetable.summary.daysWithClasses.join(", ")}
@@ -805,6 +820,18 @@ export function AcademicPlannerView({
                     <Badge variant="secondary" className="text-[11px] font-semibold">
                       {DAY_NAMES[entry.dayOfWeek] || `Day ${entry.dayOfWeek}`}
                     </Badge>
+                    {entry.classType && (
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] uppercase font-mono px-1.5 py-0 ${
+                          entry.classType === "LABORATORY"
+                            ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold"
+                            : "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                        }`}
+                      >
+                        {entry.classType === "LABORATORY" ? "Lab" : "Theory"}
+                      </Badge>
+                    )}
                     <span className="font-mono text-muted-foreground">
                       {entry.startTime} – {entry.endTime}
                     </span>
@@ -914,10 +941,20 @@ export function AcademicPlannerView({
       <Dialog open={Boolean(reviewCalendar)} onOpenChange={(open) => !open && setReviewCalendar(null)}>
         <DialogContent className="max-w-xl max-h-[85vh] flex flex-col p-6 overflow-hidden">
           <DialogHeader className="space-y-1 shrink-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="outline" className="border-primary/30 bg-primary/10 text-primary text-xs">
                 Auto-Detected ({reviewCalendar?.holidays.length || 0} holidays)
               </Badge>
+              {reviewCalendar?.extractedVia === "gemini-ai" && (
+                <Badge variant="outline" className="border-indigo-500/30 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-xs">
+                  ✨ Gemini AI
+                </Badge>
+              )}
+              {reviewCalendar?.extractedVia === "gemini-ai-cached" && (
+                <Badge variant="outline" className="border-cyan-500/30 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 text-xs">
+                  ⚡ Instant (Cached)
+                </Badge>
+              )}
               <span className="text-xs text-muted-foreground truncate">{reviewCalendar?.fileName}</span>
             </div>
             <DialogTitle className="text-xl">Review Academic Calendar</DialogTitle>
