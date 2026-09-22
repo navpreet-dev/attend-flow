@@ -21,7 +21,7 @@ export interface LogInfo {
   subjectCode: string;
   subjectName?: string;
   date: string;
-  status: "PRESENT" | "ABSENT";
+  status: "PRESENT" | "ABSENT" | "DUTY_LEAVE";
 }
 
 export interface SyncEventInfo {

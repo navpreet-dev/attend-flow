@@ -22,6 +22,7 @@ import { TrendingUp, BarChart3 } from "lucide-react";
 const EMERALD = "#10b981";
 const ROSE = "#f43f5e";
 const AMBER = "#f59e0b";
+const SKY = "#0284c7";
 
 function shortDate(ddmmyyyy: string): string {
   const m = ddmmyyyy.match(/(\d{2})[-/](\d{2})[-/](\d{4})/);
@@ -30,26 +31,28 @@ function shortDate(ddmmyyyy: string): string {
 }
 
 export function TrendsCharts({ data, threshold }: { data: DashboardPayload; threshold: number }) {
-  // ---- Daily stacked bars (present vs absent) + cumulative % line ----------
+  // ---- Daily stacked bars (present vs duty leave vs absent) + cumulative % line ----------
   const daily = useMemo(() => {
-    const byDate = new Map<string, { present: number; absent: number }>();
+    const byDate = new Map<string, { present: number; dutyLeave: number; absent: number }>();
     for (const l of data.logs) {
-      const entry = byDate.get(l.date) ?? { present: 0, absent: 0 };
-      if (l.status === "PRESENT") entry.present += 1;
-      else entry.absent += 1;
+      const entry = byDate.get(l.date) ?? { present: 0, dutyLeave: 0, absent: 0 };
+      if (l.status === "DUTY_LEAVE") entry.dutyLeave += 1;
+      else if (l.status === "PRESENT") entry.present += 1;
+      else if (l.status === "ABSENT") entry.absent += 1;
       byDate.set(l.date, entry);
     }
     const dates = Array.from(byDate.keys()).sort((a, b) => parsePortalDate(a) - parsePortalDate(b));
-    const rows: { date: string; Present: number; Absent: number; Cumulative: number }[] = [];
+    const rows: { date: string; Present: number; DutyLeave: number; Absent: number; Cumulative: number }[] = [];
     let attendedCum = 0;
     let totalCum = 0;
     for (const d of dates) {
       const e = byDate.get(d)!;
-      attendedCum += e.present;
-      totalCum += e.present + e.absent;
+      attendedCum += e.present + e.dutyLeave;
+      totalCum += e.present + e.dutyLeave + e.absent;
       rows.push({
         date: shortDate(d),
         Present: e.present,
+        DutyLeave: e.dutyLeave,
         Absent: e.absent,
         Cumulative: totalCum > 0 ? Math.round((attendedCum / totalCum) * 1000) / 10 : 0,
       });
@@ -119,6 +122,7 @@ export function TrendsCharts({ data, threshold }: { data: DashboardPayload; thre
                     label={{ value: `${threshold}% target`, fontSize: 11, position: "insideTopRight" }}
                   />
                   <Bar yAxisId="left" dataKey="Present" stackId="a" fill={EMERALD} radius={[0, 0, 0, 0]} />
+                  <Bar yAxisId="left" dataKey="DutyLeave" name="Duty Leave" stackId="a" fill={SKY} radius={[0, 0, 0, 0]} />
                   <Bar yAxisId="left" dataKey="Absent" stackId="a" fill={ROSE} radius={[4, 4, 0, 0]} />
                   <Line
                     yAxisId="right"

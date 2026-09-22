@@ -241,7 +241,7 @@ If IT IS an academic timetable, extract all class slots into compact format:
   "section": "B",
   "offDays": ["MONDAY"],
   "slots": [
-    ["DAY", "START", "END", "SUBJECT", "CODE", "TEACHER", "ROOM", "THEORY|LAB"]
+    ["DAY", "START", "END", "SUBJECT", "CODE", "TEACHER", "ROOM", "THEORY|LAB", "BATCH"]
   ]
 }
 
@@ -249,6 +249,8 @@ RULES FOR SLOTS:
 - DAY: MONDAY, TUESDAY, WEDNESDAY, THURSDAY, FRIDAY, SATURDAY
 - START/END: HH:MM in 24h format (e.g. "09:00", "09:50", "13:40")
 - THEORY|LAB: Write "LABORATORY" if class is in a computer lab, practical, or multi-hour lab block; otherwise "THEORY".
+- BATCH: If a session is for a specific group or batch (e.g. "G1", "G2", "Batch-A"), specify it. If it is for the entire class/section, set null.
+- SPLIT CELLS / SIMULTANEOUS LABS: If a cell is split by lab groups (e.g. G1 does Data Structures Lab and G2 does Web Designing Lab simultaneously), output TWO separate slot items, one for each batch!
 - Preserve exact subject name, subject code, faculty name, room/lab.
 - Exclude lunch breaks or recess.
 
@@ -268,7 +270,7 @@ Return STRICT JSON only.`;
     semester?: string | null;
     section?: string | null;
     offDays?: string[];
-    slots?: Array<[string, string, string, string, string | null, string | null, string | null, string]>;
+    slots?: Array<[string, string, string, string, string | null, string | null, string | null, string, (string | null)?]>;
     classes?: GeminiTimetableClass[];
   }
 
@@ -306,7 +308,7 @@ Return STRICT JSON only.`;
   if (Array.isArray(res.slots)) {
     for (const slot of res.slots) {
       if (!Array.isArray(slot) || slot.length < 4) continue;
-      const [rawDay, rawStart, rawEnd, subject, code, teacher, room, rawType] = slot;
+      const [rawDay, rawStart, rawEnd, subject, code, teacher, room, rawType, rawBatch] = slot;
       const day = DAY_MAP[(rawDay || "").toUpperCase()] || "MONDAY";
       const start = normalizeTime24(rawStart || "09:00");
       const end = normalizeTime24(rawEnd || "09:50");
@@ -324,7 +326,7 @@ Return STRICT JSON only.`;
         teacher: teacher ? teacher.trim() : null,
         room: room ? room.trim() : null,
         type,
-        batch: null,
+        batch: rawBatch ? String(rawBatch).trim() : null,
       });
     }
   } else if (Array.isArray(res.classes)) {

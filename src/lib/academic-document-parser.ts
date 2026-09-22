@@ -22,6 +22,7 @@ export interface ParsedTimetableEntry {
   matchConfidence: "high" | "medium" | "none";
   needsReview: boolean;
   classType?: "THEORY" | "LABORATORY";
+  batch?: string | null;
 }
 
 export interface ParsedTimetableResult {

@@ -77,7 +77,7 @@ model AttendanceLog {
   studentId   String
   subjectCode String
   date        String // dd-MM-yyyy as reported by the portal
-  status      String // PRESENT | ABSENT
+  status      String // PRESENT | ABSENT | DUTY_LEAVE
   student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@unique([studentId, subjectCode, date])
@@ -150,6 +150,7 @@ model TimetableEntry {
   room               String?
   teacher            String?
   matchedSubjectCode String?  // Matched AttendFlow portal subjectCode
+  batch              String?  // Optional lab/batch identifier (e.g. "G1", "G2", "Batch-A")
   sourceFileName     String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt

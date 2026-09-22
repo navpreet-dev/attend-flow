@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { formatTime12Hour } from "@/lib/utils";
+import { formatTime12Hour, cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -123,18 +123,59 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
     [data.subjects, threshold]
   );
 
+  // Lab group selection (G1, G2, or Both for all/both)
+  const [selectedGroup, setSelectedGroup] = useState<"G1" | "G2" | "Both">(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("attendflow_lab_group");
+      if (saved === "G1" || saved === "G2" || saved === "Both") return saved as "G1" | "G2" | "Both";
+      if (saved === "Unknown") return "Both";
+    }
+    return "Both";
+  });
+
+  const handleGroupChange = useCallback((g: "G1" | "G2" | "Both") => {
+    setSelectedGroup(g);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("attendflow_lab_group", g);
+    }
+  }, []);
+
   // Map scheduled remaining classes per subject if planner is configured
-  const scheduledRemainingMap = useMemo(() => {
+  const { scheduledRemainingMap, labRemainingMap, remainingByGroupMap, isGroupDividedMap } = useMemo(() => {
     if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
-      return {} as Record<string, number>;
+      return {
+        scheduledRemainingMap: {} as Record<string, number>,
+        labRemainingMap: {} as Record<string, { G1: number; G2: number }>,
+        remainingByGroupMap: {} as Record<string, Record<string, number> | null>,
+        isGroupDividedMap: {} as Record<string, boolean>,
+      };
     }
-    const map: Record<string, number> = {};
+    const remMap: Record<string, number> = {};
+    const labMap: Record<string, { G1: number; G2: number }> = {};
+    const groupMap: Record<string, Record<string, number> | null> = {};
+    const divMap: Record<string, boolean> = {};
     for (const s of data.subjects) {
-      const m = calculateSubjectScheduleMetrics(s.subjectCode, plannerState.calendar, plannerState.timetable);
-      map[s.subjectCode] = m.scheduledRemaining;
+      const m = calculateSubjectScheduleMetrics(
+        s.subjectCode,
+        plannerState.calendar,
+        plannerState.timetable,
+        new Date(),
+        selectedGroup
+      );
+      remMap[s.subjectCode] = m.scheduledRemaining;
+      divMap[s.subjectCode] = Boolean(m.isGroupDivided);
+      if (m.labRemaining) {
+        labMap[s.subjectCode] = m.labRemaining;
+      }
+      groupMap[s.subjectCode] = m.remainingByGroup ?? null;
     }
-    return map;
-  }, [plannerState, data.subjects]);
+    return {
+      scheduledRemainingMap: remMap,
+      labRemainingMap: labMap,
+      remainingByGroupMap: groupMap,
+      isGroupDividedMap: divMap,
+    };
+  }, [plannerState, data.subjects, selectedGroup]);
 
   // Today and Tomorrow upcoming classes preview
   const { todayClasses, tomorrowClasses } = useMemo(() => {
@@ -147,11 +188,11 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
     tomorrow.setDate(tomorrow.getDate() + 1);
     const tomorrowStr = toDateString(tomorrow);
 
-    const all = generateScheduledClasses(plannerState.calendar, plannerState.timetable, today);
+    const all = generateScheduledClasses(plannerState.calendar, plannerState.timetable, today, selectedGroup);
     const todayClasses = all.filter((c) => c.date === todayStr);
     const tomorrowClasses = all.filter((c) => c.date === tomorrowStr);
     return { todayClasses, tomorrowClasses };
-  }, [plannerState]);
+  }, [plannerState, selectedGroup]);
 
   const runSync = useCallback(
     async (silent = false) => {
@@ -283,6 +324,11 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
   const sortedLogs = useMemo(
     () => [...data.logs].sort((a, b) => parsePortalDate(b.date) - parsePortalDate(a.date)),
+    [data.logs]
+  );
+
+  const overallDutyLeave = useMemo(
+    () => data.logs.filter((l) => l.status === "DUTY_LEAVE").length,
     [data.logs]
   );
 
@@ -465,7 +511,8 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             </CardHeader>
             <CardContent className="pt-0">
               <p className="text-xs text-muted-foreground">
-                {overall.total - overall.attended} missed across {data.subjects.length} subjects
+                {overall.total - overall.attended} missed
+                {overallDutyLeave > 0 ? ` · ${overallDutyLeave} duty leave` : ""} across {data.subjects.length} subjects
               </p>
             </CardContent>
           </Card>
@@ -605,11 +652,54 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
               </div>
             )}
 
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-display text-lg font-semibold tracking-tight">Subject-wise attendance</h2>
-              <p className="text-xs text-muted-foreground">
-                Target: <span className="font-semibold text-foreground">{threshold}%</span> · tap any card for the full class log
-              </p>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg font-semibold tracking-tight">Subject-wise attendance</h2>
+                <p className="text-xs text-muted-foreground">
+                  Target: <span className="font-semibold text-foreground">{threshold}%</span> · tap any card for the full class log
+                </p>
+              </div>
+              {plannerState?.configured && (
+                <div className="flex items-center gap-1 rounded-xl border border-border/70 bg-card/80 p-1 text-xs shadow-xs">
+                  <span className="px-2 text-[11px] font-medium text-muted-foreground">Lab Group:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleGroupChange("Both")}
+                    className={cn(
+                      "rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors",
+                      selectedGroup === "Both"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Both
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGroupChange("G1")}
+                    className={cn(
+                      "rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors",
+                      selectedGroup === "G1"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    G1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleGroupChange("G2")}
+                    className={cn(
+                      "rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors",
+                      selectedGroup === "G2"
+                        ? "bg-emerald-600 text-white shadow-xs"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    G2
+                  </button>
+                </div>
+              )}
             </div>
             {data.subjects.length === 0 ? (
               <Card>
@@ -627,6 +717,10 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                     threshold={threshold}
                     index={i}
                     scheduledRemaining={scheduledRemainingMap[s.subjectCode]}
+                    isGroupDivided={isGroupDividedMap[s.subjectCode]}
+                    labRemaining={labRemainingMap[s.subjectCode]}
+                    remainingByGroup={remainingByGroupMap[s.subjectCode]}
+                    selectedGroup={selectedGroup}
                     onOpenSimulator={(code) => {
                       setSelectedToolSubject(code);
                       setActiveTab("tools");
@@ -719,12 +813,14 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                             <Badge
                               variant="outline"
                               className={
-                                l.status === "PRESENT"
+                                l.status === "DUTY_LEAVE"
+                                  ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400 font-medium"
+                                  : l.status === "PRESENT"
                                   ? "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
                                   : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400"
                               }
                             >
-                              {l.status}
+                              {l.status === "DUTY_LEAVE" ? "Duty Leave" : l.status === "PRESENT" ? "Present" : "Absent"}
                             </Badge>
                           </TableCell>
                         </TableRow>

@@ -186,7 +186,8 @@ export function exportLogsCsv(data: DashboardPayload) {
     (a, b) => parsePortalDate(b.date) - parsePortalDate(a.date)
   );
   for (const l of sorted) {
-    rows.push([l.date, l.subjectName ?? l.subjectCode, l.status]);
+    const statusLabel = l.status === "DUTY_LEAVE" ? "Duty Leave" : l.status;
+    rows.push([l.date, l.subjectName ?? l.subjectCode, statusLabel]);
   }
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
   download(`attendflow-log-${data.profile?.rollNo ?? "student"}.csv`, csv, "text/csv;charset=utf-8");

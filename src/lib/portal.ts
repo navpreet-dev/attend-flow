@@ -118,7 +118,7 @@ export interface PortalSubject {
 export interface PortalLogEntry {
   subjectCode: string;
   date: string; // dd-MM-yyyy as printed by the portal
-  status: "PRESENT" | "ABSENT";
+  status: "PRESENT" | "ABSENT" | "DUTY_LEAVE";
 }
 
 export interface PortalCookie {
@@ -610,15 +610,16 @@ function parseAttendanceReport(html: string): { attended: number; total: number;
     const dm = rowText.match(DATE_RE);
     if (!dm) continue;
 
-    let status: "PRESENT" | "ABSENT" | null = null;
-    if (/\bPRESENT\b/i.test(rowText)) status = "PRESENT";
+    let status: "PRESENT" | "ABSENT" | "DUTY_LEAVE" | null = null;
+    if (/\bDUTY\s+LEAVE\b/i.test(rowText) || /\bDUTY\b/i.test(rowText)) status = "DUTY_LEAVE";
+    else if (/\bPRESENT\b/i.test(rowText)) status = "PRESENT";
     else if (/\bABSENT\b/i.test(rowText)) status = "ABSENT";
     else if (/\bP\b/.test(rowText) && rowText.replace(/[^A-Za-z]/g, "").length <= 1) status = "PRESENT";
     else if (/\bA\b/.test(rowText) && rowText.replace(/[^A-Za-z]/g, "").length <= 1) status = "ABSENT";
     if (!status) continue;
 
     total += 1;
-    if (status === "PRESENT") attended += 1;
+    if (status === "PRESENT" || status === "DUTY_LEAVE") attended += 1;
     logs.push({
       subjectCode: "", // filled by caller
       date: `${dm[1]}-${dm[2]}-${dm[3]}`,

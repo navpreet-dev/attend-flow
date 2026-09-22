@@ -547,15 +547,18 @@ export function AcademicPlannerView({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLoadAmritsarTemplate}
-              className="text-xs bg-primary/5 border-primary/30 hover:bg-primary/10 text-primary"
-            >
-              <BookOpenCheck className="h-3.5 w-3.5 mr-1.5" />
-              1-Click: Amritsar BCA-3B Schedule
-            </Button>
+            {/* Dev-only quick-fill button: hidden in production so other-department students never see it */}
+            {process.env.NODE_ENV !== "production" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleLoadAmritsarTemplate}
+                className="text-xs bg-primary/5 border-primary/30 hover:bg-primary/10 text-primary"
+              >
+                <BookOpenCheck className="h-3.5 w-3.5 mr-1.5" />
+                [Dev] Load AGC BCA-3B Sample Schedule
+              </Button>
+            )}
 
             {plannerState.configured && (
               <Button

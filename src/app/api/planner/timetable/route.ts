@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionStudent } from "@/lib/session";
+import { adaptLegacyTimetableEntries } from "@/lib/date-iteration-engine";
 
 const DAY_NAME_TO_NUM: Record<string, number> = {
   MONDAY: 1,
@@ -74,8 +75,9 @@ export async function POST(req: NextRequest) {
       });
 
       if (entries.length > 0) {
+        const adapted = adaptLegacyTimetableEntries(entries as any);
         await tx.timetableEntry.createMany({
-          data: entries.map((e) => ({
+          data: adapted.map((e) => ({
             studentId: student.id,
             dayOfWeek: Math.min(7, Math.max(1, Math.floor(e.dayOfWeek || 1))),
             subjectCode: (e.subjectCode || "SUBJ").trim(),
@@ -85,6 +87,7 @@ export async function POST(req: NextRequest) {
             room: e.room?.trim() || null,
             teacher: e.teacher?.trim() || null,
             matchedSubjectCode: e.matchedSubjectCode?.trim() || null,
+            batch: (e as any).batch?.trim() || null,
             sourceFileName,
           })),
         });

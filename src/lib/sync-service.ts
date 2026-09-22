@@ -66,7 +66,7 @@ export async function getDashboardData(studentDbId: string): Promise<DashboardPa
       subjectCode: l.subjectCode,
       subjectName: subjectNames.get(l.subjectCode),
       date: l.date,
-      status: l.status as "PRESENT" | "ABSENT",
+      status: l.status as "PRESENT" | "ABSENT" | "DUTY_LEAVE",
     })),
     settings: {
       threshold: student.threshold,
@@ -146,16 +146,31 @@ export async function persistSnapshot(
 
   const existingLogs = await db.attendanceLog.findMany({
     where: { studentId: studentDbId },
-    select: { subjectCode: true, date: true },
+    select: { subjectCode: true, date: true, status: true },
   });
-  const have = new Set(existingLogs.map((l) => `${l.subjectCode}|${l.date}`));
+  const existingMap = new Map(existingLogs.map((l) => [`${l.subjectCode}|${l.date}`, l.status]));
   const seen = new Set<string>();
-  const newLogs = snapshot.logs.filter((l) => {
+  const newLogs: typeof snapshot.logs = [];
+  for (const l of snapshot.logs) {
     const key = `${l.subjectCode}|${l.date}`;
-    if (have.has(key) || seen.has(key)) return false;
+    if (seen.has(key)) continue;
     seen.add(key);
-    return true;
-  });
+    const existingStatus = existingMap.get(key);
+    if (!existingStatus) {
+      newLogs.push(l);
+    } else if (existingStatus !== l.status) {
+      await db.attendanceLog.update({
+        where: {
+          studentId_subjectCode_date: {
+            studentId: studentDbId,
+            subjectCode: l.subjectCode,
+            date: l.date,
+          },
+        },
+        data: { status: l.status },
+      });
+    }
+  }
   if (newLogs.length > 0) {
     await db.attendanceLog.createMany({
       data: newLogs.map((l) => ({
@@ -201,7 +216,9 @@ function loadPortalCookies(student: {
   if (!student.portalCookiesEnc || !student.portalCookiesAt) return null;
   if (Date.now() - student.portalCookiesAt.getTime() > PORTAL_SESSION_REUSE_MS) return null;
   try {
-    const parsed = JSON.parse(decryptSecret(student.portalCookiesEnc));
+    const decrypted = decryptSecret(student.portalCookiesEnc);
+    if (!decrypted) return null;
+    const parsed = JSON.parse(decrypted);
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
     return parsed.filter(
       (c): c is PortalCookie => c && typeof c.name === "string" && typeof c.value === "string"
@@ -332,19 +349,34 @@ export async function syncStudent(
         });
       }
 
-      // Append-only log rows (dedup on subject+date)
+      // Log rows (dedup on subject+date, safely update if status changed on portal)
       const existingLogs = await db.attendanceLog.findMany({
         where: { studentId: studentDbId },
-        select: { subjectCode: true, date: true },
+        select: { subjectCode: true, date: true, status: true },
       });
-      const have = new Set(existingLogs.map((l) => `${l.subjectCode}|${l.date}`));
+      const existingMap = new Map(existingLogs.map((l) => [`${l.subjectCode}|${l.date}`, l.status]));
       const seen = new Set<string>();
-      const newLogs = snapshot.logs.filter((l) => {
+      const newLogs: typeof snapshot.logs = [];
+      for (const l of snapshot.logs) {
         const key = `${l.subjectCode}|${l.date}`;
-        if (have.has(key) || seen.has(key)) return false;
+        if (seen.has(key)) continue;
         seen.add(key);
-        return true;
-      });
+        const existingStatus = existingMap.get(key);
+        if (!existingStatus) {
+          newLogs.push(l);
+        } else if (existingStatus !== l.status) {
+          await db.attendanceLog.update({
+            where: {
+              studentId_subjectCode_date: {
+                studentId: studentDbId,
+                subjectCode: l.subjectCode,
+                date: l.date,
+              },
+            },
+            data: { status: l.status },
+          });
+        }
+      }
       if (newLogs.length > 0) {
         await db.attendanceLog.createMany({
           data: newLogs.map((l) => ({

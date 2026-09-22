@@ -66,18 +66,34 @@ export function CalculatorSimulatorView({
   plannerState,
 }: CalculatorSimulatorViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<"simulator" | "recovery">("simulator");
+
+  // Default to first real subject (never OVERALL) so individual-subject math is always shown
+  const firstSubjectCode = data.subjects[0]?.subjectCode ?? "CUSTOM";
   const [selectedSubjectCode, setSelectedSubjectCode] = useState<string>(
-    initialSelectedSubjectCode || "OVERALL"
+    initialSelectedSubjectCode && initialSelectedSubjectCode !== "OVERALL"
+      ? initialSelectedSubjectCode
+      : firstSubjectCode
   );
 
-  // Sync initialSelectedSubjectCode if changed externally
+  // Local G1/G2 toggle for group-divided subjects inside the simulator
+  // null means "not yet chosen" (user must pick when subject is a lab)
+  const [simulatorLabGroup, setSimulatorLabGroup] = useState<"G1" | "G2" | null>(null);
+
+  // Sync initialSelectedSubjectCode if changed externally (e.g. from subject card tap)
   useEffect(() => {
-    if (initialSelectedSubjectCode) {
+    if (initialSelectedSubjectCode && initialSelectedSubjectCode !== "OVERALL") {
       setSelectedSubjectCode(initialSelectedSubjectCode);
+      setSimulatorLabGroup(null); // reset local group when subject changes externally
     }
   }, [initialSelectedSubjectCode]);
 
-  // Overall stats
+  // Reset lab group whenever the user manually switches subjects
+  const handleSubjectChange = (code: string) => {
+    setSelectedSubjectCode(code);
+    setSimulatorLabGroup(null);
+  };
+
+  // Overall stats (still used for CUSTOM fallback math)
   const overall = useMemo(() => overallStats(data.subjects), [data.subjects]);
 
   // Custom manual inputs
@@ -97,40 +113,85 @@ export function CalculatorSimulatorView({
     setTargetPercentage(threshold);
   }, [threshold]);
 
-  // Derive timetable schedule metrics for currently selected subject if planner configured
+  const savedGroup = useMemo(() => {
+    if (typeof window !== "undefined") {
+      const g = localStorage.getItem("attendflow_lab_group");
+      if (g === "G1" || g === "G2" || g === "Both") return g as "G1" | "G2" | "Both";
+    }
+    return "Both";
+  }, []);
+
+  // Resolve group-divided metadata from the DashboardPayload subject list (universally data-driven)
+  const isCurrentSubjectGroupDivided = useMemo(() => {
+    if (selectedSubjectCode === "CUSTOM") return false;
+    const s = data.subjects.find((x) => x.subjectCode === selectedSubjectCode);
+    if (!s) return false;
+    // Use the isGroupDivided flag propagated from the date-iteration engine, or fall back to
+    // checking whether remainingByGroup has more than one group key.
+    // Cast through unknown because SubjectInfo doesn't have an index signature; these extra
+    // fields are attached by the dashboard enrichment pipeline at runtime.
+    const sAny = s as unknown as Record<string, unknown>;
+    if (sAny.isGroupDivided === true) return true;
+    const rbg = sAny.remainingByGroup as Record<string, number> | null | undefined;
+    if (rbg && Object.keys(rbg).length > 0) return true;
+    return false;
+  }, [selectedSubjectCode, data.subjects]);
+
+  // Derive timetable schedule metrics for currently selected subject if planner configured.
+  // For group-divided subjects, pass the local simulator toggle (simulatorLabGroup), otherwise
+  // fall back to the globally saved group preference.
   const timetableMetrics = useMemo(() => {
     if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
       return null;
     }
-    if (selectedSubjectCode === "OVERALL" || selectedSubjectCode === "CUSTOM") {
+    if (selectedSubjectCode === "CUSTOM") {
       return null;
     }
+    const groupArg = isCurrentSubjectGroupDivided
+      ? (simulatorLabGroup ?? "Both")
+      : savedGroup;
     return calculateSubjectScheduleMetrics(
       selectedSubjectCode,
       plannerState.calendar,
-      plannerState.timetable
+      plannerState.timetable,
+      new Date(),
+      groupArg
     );
-  }, [plannerState, selectedSubjectCode]);
+  }, [plannerState, selectedSubjectCode, savedGroup, isCurrentSubjectGroupDivided, simulatorLabGroup]);
 
-  // When subject changes, prefill remaining classes if timetable metrics are available
-  useEffect(() => {
-    if (timetableMetrics && timetableMetrics.scheduledRemaining > 0) {
-      setRemainingClassesInput(String(timetableMetrics.scheduledRemaining));
+  // effectiveRemainingClasses — the single source of truth for scheduler math in this view.
+  // For unified (theory) subjects: use scheduledRemaining directly.
+  // For group-divided (lab) subjects: use the count for the selected simulatorLabGroup.
+  // If the group toggle is null (not chosen yet), default to 0 to avoid misleading forecasts.
+  const effectiveRemainingClasses = useMemo(() => {
+    if (!timetableMetrics) return 0;
+    if (isCurrentSubjectGroupDivided) {
+      if (!simulatorLabGroup) return 0; // user hasn't chosen a group yet
+      const rbg = timetableMetrics.remainingByGroup;
+      if (rbg && typeof rbg[simulatorLabGroup] === "number") {
+        return rbg[simulatorLabGroup];
+      }
+      return timetableMetrics.scheduledRemaining; // fallback
     }
-  }, [timetableMetrics]);
+    return timetableMetrics.scheduledRemaining;
+  }, [timetableMetrics, isCurrentSubjectGroupDivided, simulatorLabGroup]);
+
+  // When subject changes, prefill the Recovery Calculator's remaining-classes input
+  useEffect(() => {
+    if (timetableMetrics) {
+      const rem = effectiveRemainingClasses;
+      if (rem > 0) {
+        setRemainingClassesInput(String(rem));
+      } else if (!isCurrentSubjectGroupDivided) {
+        // For theory subjects with 0 remaining, clear the field so it doesn't mislead
+        setRemainingClassesInput("");
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timetableMetrics, isCurrentSubjectGroupDivided]);
 
   // Resolve currently active subject data
   const currentSubjectInfo = useMemo(() => {
-    if (selectedSubjectCode === "OVERALL") {
-      return {
-        name: "Overall Attendance (All Subjects)",
-        code: "OVERALL",
-        attended: overall.attended,
-        total: overall.total,
-        percentage: overall.percentage,
-        isCustom: false,
-      };
-    }
     if (selectedSubjectCode === "CUSTOM") {
       const safeA = Math.max(0, customAttended);
       const safeT = Math.max(safeA, customTotal);
@@ -155,15 +216,17 @@ export function CalculatorSimulatorView({
         isCustom: false,
       };
     }
+    // Fallback: show first available subject
+    const first = data.subjects[0];
     return {
-      name: "Overall Attendance",
-      code: "OVERALL",
-      attended: overall.attended,
-      total: overall.total,
-      percentage: overall.percentage,
+      name: first?.subjectName ?? "No subject",
+      code: first?.subjectCode ?? "",
+      attended: first?.attended ?? 0,
+      total: first?.total ?? 0,
+      percentage: first?.percentage ?? 0,
       isCustom: false,
     };
-  }, [selectedSubjectCode, data.subjects, overall, customAttended, customTotal]);
+  }, [selectedSubjectCode, data.subjects, customAttended, customTotal]);
 
   // Compute Simulation Result
   const simulation = useMemo(() => {
@@ -197,13 +260,13 @@ export function CalculatorSimulatorView({
     if (selectedSubjectCode === "OVERALL" || selectedSubjectCode === "CUSTOM") {
       return [];
     }
-    const allInstances = generateScheduledClasses(plannerState.calendar, plannerState.timetable);
+    const allInstances = generateScheduledClasses(plannerState.calendar, plannerState.timetable, new Date(), savedGroup);
     return allInstances.filter(
       (inst) =>
         (inst.matchedSubjectCode === selectedSubjectCode || inst.subjectCode === selectedSubjectCode) &&
         !inst.isPassed
     );
-  }, [plannerState, selectedSubjectCode]);
+  }, [plannerState, selectedSubjectCode, savedGroup]);
 
   // Calendar Recovery Date prediction
   const recoveryDatePrediction = useMemo(() => {
@@ -213,19 +276,19 @@ export function CalculatorSimulatorView({
     return calculateRecoveryDate(recovery.classesNeeded, upcomingClassesForSubject);
   }, [recovery.classesNeeded, upcomingClassesForSubject]);
 
-  // Semester End Projection
+  // Semester End Projection — uses effectiveRemainingClasses so labs use the chosen group's count
   const semesterProjection = useMemo(() => {
-    if (!timetableMetrics || timetableMetrics.scheduledRemaining <= 0) {
-      return null;
-    }
+    // If it's a lab with no group selected, don't show misleading numbers
+    if (isCurrentSubjectGroupDivided && !simulatorLabGroup) return null;
+    if (effectiveRemainingClasses <= 0) return null;
     return simulateSemesterProjection(
       currentSubjectInfo.attended,
       currentSubjectInfo.total,
-      timetableMetrics.scheduledRemaining,
+      effectiveRemainingClasses,
       bunkMore,
       targetPercentage
     );
-  }, [timetableMetrics, currentSubjectInfo.attended, currentSubjectInfo.total, bunkMore, targetPercentage]);
+  }, [effectiveRemainingClasses, isCurrentSubjectGroupDivided, simulatorLabGroup, currentSubjectInfo.attended, currentSubjectInfo.total, bunkMore, targetPercentage]);
 
   return (
     <div className="space-y-6">
@@ -233,26 +296,24 @@ export function CalculatorSimulatorView({
       <Card className="card-premium rounded-2xl border-border/60">
         <CardContent className="p-4 sm:p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-1">
+            <div className="space-y-1 flex-1">
               <Label htmlFor="subject-select" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Select Course / Subject to Analyze
               </Label>
               <div className="flex flex-wrap items-center gap-2">
-                <Select value={selectedSubjectCode} onValueChange={setSelectedSubjectCode}>
+                <Select value={selectedSubjectCode} onValueChange={handleSubjectChange}>
                   <SelectTrigger id="subject-select" className="w-full sm:w-[320px] rounded-xl font-medium">
                     <SelectValue placeholder="Select subject" />
                   </SelectTrigger>
                   <SelectContent className="rounded-xl max-h-72">
-                    <SelectItem value="OVERALL">
-                      <span className="font-semibold">Overall Attendance</span> ({overall.attended}/{overall.total} · {overall.percentage.toFixed(1)}%)
-                    </SelectItem>
+                    {/* Overall Attendance removed — eligibility is per-subject only */}
                     {data.subjects.map((s) => (
                       <SelectItem key={s.subjectCode} value={s.subjectCode}>
                         {s.subjectName} ({s.attended}/{s.total} · {s.percentage.toFixed(1)}%)
                       </SelectItem>
                     ))}
                     <SelectItem value="CUSTOM">
-                      <span className="italic text-muted-foreground">⚙️ Custom custom values…</span>
+                      <span className="italic text-muted-foreground">⚙️ Custom manual values…</span>
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -268,6 +329,37 @@ export function CalculatorSimulatorView({
                   Current: {currentSubjectInfo.percentage.toFixed(1)}% ({currentSubjectInfo.attended}/{currentSubjectInfo.total})
                 </Badge>
               </div>
+
+              {/* Lab Group Toggle — only rendered when selected subject is group-divided */}
+              {isCurrentSubjectGroupDivided && (
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Lab Group:
+                  </span>
+                  <div className="flex items-center gap-1 rounded-lg bg-muted/60 p-0.5">
+                    {(["G1", "G2"] as const).map((g) => (
+                      <button
+                        key={g}
+                        type="button"
+                        onClick={() => setSimulatorLabGroup(g)}
+                        className={`rounded-md px-3 py-1 text-xs font-semibold transition-all ${
+                          simulatorLabGroup === g
+                            ? "bg-background text-foreground shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                        aria-pressed={simulatorLabGroup === g}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                  {!simulatorLabGroup && (
+                    <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                      ← Select your lab group for accurate forecasts
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Sub-tab switcher */}
@@ -649,13 +741,22 @@ export function CalculatorSimulatorView({
                             </>
                           )}
                         </p>
-                        {timetableMetrics && timetableMetrics.scheduledRemaining > 0 && (
+                        {effectiveRemainingClasses > 0 && (
                           <p className="mt-2 text-xs border-t border-current/15 pt-2 opacity-95">
-                            <strong>Timetable context:</strong> Based on your schedule, there are{" "}
-                            {timetableMetrics.scheduledRemaining} classes remaining for this subject.
+                            <strong>Timetable context:</strong> Based on your schedule
+                            {isCurrentSubjectGroupDivided && simulatorLabGroup
+                              ? ` (${simulatorLabGroup})`
+                              : ""}
+                            , there are{" "}
+                            <strong>{effectiveRemainingClasses}</strong> classes remaining for this subject.
                             After this simulated scenario ({attendMore + bunkMore} classes),{" "}
-                            {Math.max(0, timetableMetrics.scheduledRemaining - attendMore - bunkMore)} scheduled
+                            <strong>{Math.max(0, effectiveRemainingClasses - attendMore - bunkMore)}</strong> scheduled
                             classes will remain.
+                          </p>
+                        )}
+                        {isCurrentSubjectGroupDivided && !simulatorLabGroup && (
+                          <p className="mt-2 text-xs border-t border-current/15 pt-2 opacity-80 italic">
+                            Select your lab group (G1 / G2) above to see timetable-accurate forecasts.
                           </p>
                         )}
                       </div>
@@ -784,25 +885,31 @@ export function CalculatorSimulatorView({
                         Optional
                       </Badge>
                     </div>
-                    {timetableMetrics && timetableMetrics.scheduledRemaining > 0 && (
+                    {effectiveRemainingClasses > 0 && (
                       <div className="flex items-center justify-between rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1.5 text-xs text-emerald-800 dark:text-emerald-300">
                         <span className="flex items-center gap-1.5">
                           <Clock className="h-3.5 w-3.5 shrink-0" />
                           <span>
-                            Timetable: <strong>{timetableMetrics.scheduledRemaining}</strong> classes remain
-                            {timetableMetrics.upcomingThisWeek.length > 0
+                            Timetable{isCurrentSubjectGroupDivided && simulatorLabGroup ? ` (${simulatorLabGroup})` : ""}
+                            : <strong>{effectiveRemainingClasses}</strong> classes remain
+                            {timetableMetrics && timetableMetrics.upcomingThisWeek.length > 0
                               ? ` (${timetableMetrics.upcomingThisWeek.length} this week)`
                               : ""}
                           </span>
                         </span>
                         <button
                           type="button"
-                          onClick={() => setRemainingClassesInput(String(timetableMetrics.scheduledRemaining))}
+                          onClick={() => setRemainingClassesInput(String(effectiveRemainingClasses))}
                           className="text-[11px] underline font-semibold hover:opacity-80"
                         >
                           Auto-fill
                         </button>
                       </div>
+                    )}
+                    {isCurrentSubjectGroupDivided && !simulatorLabGroup && (
+                      <p className="text-[11px] text-amber-600 dark:text-amber-400 font-medium mt-1">
+                        Select your lab group (G1 / G2) in the selector above to auto-fill.
+                      </p>
                     )}
                     <Input
                       id="remaining-classes"

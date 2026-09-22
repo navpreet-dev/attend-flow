@@ -6,6 +6,69 @@
  * and recovery intelligence based on student-configured calendars and timetables.
  */
 
+import {
+  calculateRemainingClasses,
+  getKolkataDateParts,
+  isLaboratorySubject,
+  type LabGroup,
+  type EngineTimetableEntry,
+  type DateIterationResult,
+  type EngineSubjectAudit,
+  type ScheduleException,
+} from "./date-iteration-engine";
+
+export {
+  calculateRemainingClasses,
+  getKolkataDateParts,
+  isLaboratorySubject,
+};
+
+export type {
+  LabGroup,
+  EngineTimetableEntry,
+  DateIterationResult,
+  EngineSubjectAudit,
+  ScheduleException,
+};
+
+
+// ---------------------------------------------------------------------------
+// FALLBACK DEFAULTS
+// These constants are used ONLY as a last-resort guard when the user has NOT
+// yet configured an Academic Calendar in the Planner.
+//
+// ⚡ They are NEVER hardcoded into the date-iteration engine itself.
+// ⚡ Once a student uploads their own calendar the engine uses their specific
+//    startDate, endDate, workingDays, holidays, and timetableOffDays — making
+//    these constants completely irrelevant for configured users.
+//
+// They are kept here purely so the API can return a graceful "teaching period
+// not yet configured" response instead of crashing with no calendar present.
+// ---------------------------------------------------------------------------
+
+/** Semester teaching-cutoff fallback (used only if student has no calendar). */
+export const DEFAULT_TEACHING_END_DATE = "2026-11-04";
+export const TEACHING_END_DATE = DEFAULT_TEACHING_END_DATE;
+
+/**
+ * Fallback holidays shown on the Planner preview when no calendar is uploaded.
+ * Holidays are otherwise stored per-student in the AcademicHoliday table and
+ * automatically read from the student's uploaded academic calendar document.
+ */
+export const DEFAULT_OFFICIAL_HOLIDAYS = [
+  "2026-10-02", // Gandhi Jayanti
+  "2026-10-20", // Diwali
+  "2026-10-29", // Diwali 2
+];
+export const OFFICIAL_HOLIDAYS = DEFAULT_OFFICIAL_HOLIDAYS;
+
+/**
+ * Fallback off-day numbers (1=Mon … 7=Sun) used when the student has not
+ * uploaded a timetable. Overridden by timetableOffDays stored in the DB.
+ */
+export const NORMAL_DEPARTMENTAL_OFF_DAYS = [1, 6, 7];
+
+
 export interface HolidayItem {
   id?: string;
   date: string; // YYYY-MM-DD
@@ -15,6 +78,7 @@ export interface HolidayItem {
 export interface AcademicCalendarConfig {
   startDate: string; // YYYY-MM-DD
   endDate: string; // YYYY-MM-DD
+  teachingEndDate?: string; // YYYY-MM-DD
   workingDays: number[]; // 1 = Monday, 2 = Tuesday, ..., 7 = Sunday
   holidays: HolidayItem[];
   /**
@@ -25,6 +89,8 @@ export interface AcademicCalendarConfig {
    * These are combined with (not a replacement for) calendar workingDays and holidays.
    */
   timetableOffDays?: number[];
+  /** Student's laboratory group: "G1" | "G2" | "Unknown" */
+  group?: LabGroup;
 }
 
 export interface TimetableEntryItem {
@@ -37,6 +103,9 @@ export interface TimetableEntryItem {
   room?: string | null;
   teacher?: string | null;
   matchedSubjectCode?: string | null;
+  batch?: string | null;
+  labGroup?: "G1" | "G2" | "All" | null;
+  isLab?: boolean;
 }
 
 export interface ScheduledClassInstance {
@@ -47,6 +116,7 @@ export interface ScheduledClassInstance {
   subjectCode: string;
   subjectName: string;
   matchedSubjectCode?: string | null;
+  batch?: string | null;
   room?: string | null;
   teacher?: string | null;
   isPassed: boolean;
@@ -57,10 +127,15 @@ export interface SubjectScheduleMetrics {
   totalScheduled: number;
   scheduledPassed: number;
   scheduledRemaining: number;
+  isGroupDivided?: boolean;
+  labRemaining?: { G1: number; G2: number };
+  remainingByGroup?: Record<string, number> | null;
+  countedDates?: string[];
   nextClass: ScheduledClassInstance | null;
   upcomingThisWeek: ScheduledClassInstance[];
   upcomingThisMonth: ScheduledClassInstance[];
   semesterEndDate: string;
+  teachingEndDate?: string;
 }
 
 export interface PlannerRecoveryInsight {
@@ -162,7 +237,8 @@ export function matchTimetableSubject(
 export function generateScheduledClasses(
   calendar: AcademicCalendarConfig,
   timetable: TimetableEntryItem[],
-  asOf: Date = new Date()
+  asOf: Date = new Date(),
+  selectedGroup?: LabGroup | string
 ): ScheduledClassInstance[] {
   if (!calendar.startDate || !calendar.endDate || timetable.length === 0) {
     return [];
@@ -212,6 +288,14 @@ export function generateScheduledClasses(
     if (workingDaysSet.has(dayOfWeek) && !timetableOffDaysSet.has(dayOfWeek) && !holidaySet.has(dateStr)) {
       const classesOnDay = dayMap.get(dayOfWeek) || [];
       for (const cls of classesOnDay) {
+        // Filter by group if specific group requested
+        if (selectedGroup && selectedGroup !== "Both" && selectedGroup !== "Unknown") {
+          const clsGroup = (cls.batch || cls.labGroup || "").trim().toUpperCase();
+          if (clsGroup && clsGroup !== selectedGroup.trim().toUpperCase()) {
+            continue;
+          }
+        }
+
         // Determine whether this class has already passed
         let isPassed = false;
         if (dateStr < asOfDateStr) {
@@ -255,7 +339,8 @@ export function calculateSubjectScheduleMetrics(
   targetSubjectCode: string,
   calendar: AcademicCalendarConfig | null,
   timetable: TimetableEntryItem[],
-  asOf: Date = new Date()
+  asOf: Date = new Date(),
+  group: LabGroup = "Both"
 ): SubjectScheduleMetrics {
   if (!calendar) {
     return {
@@ -263,12 +348,55 @@ export function calculateSubjectScheduleMetrics(
       totalScheduled: 0,
       scheduledPassed: 0,
       scheduledRemaining: 0,
+      isGroupDivided: false,
       nextClass: null,
       upcomingThisWeek: [],
       upcomingThisMonth: [],
       semesterEndDate: "",
+      teachingEndDate: TEACHING_END_DATE,
     };
   }
+
+  // Active group parameter from user selection takes precedence!
+  const effectiveGroup =
+    group && group !== "Both" && group !== "Unknown"
+      ? group
+      : calendar.group && calendar.group !== "Both" && calendar.group !== "Unknown"
+      ? calendar.group
+      : group || "Both";
+  // Cap teaching end date at TEACHING_END_DATE (or calendar.teachingEndDate if specified)
+  const effectiveTeachingEndDate =
+    calendar.teachingEndDate ||
+    (calendar.endDate && calendar.endDate < TEACHING_END_DATE
+      ? calendar.endDate
+      : TEACHING_END_DATE);
+
+  const remainingResult = calculateRemainingClasses({
+    now: asOf,
+    timezone: "Asia/Kolkata",
+    calendar: {
+      startDate: calendar.startDate,
+      teachingEndDate: effectiveTeachingEndDate,
+      workingDays: calendar.workingDays,
+      excludedDays: calendar.timetableOffDays,
+      holidays: calendar.holidays,
+    },
+    timetable: timetable.map((t) => ({
+      ...t,
+      matchedSubjectCode: t.matchedSubjectCode || t.subjectCode,
+      batch: t.batch || (t as any).labGroup || null,
+      isLab: isLaboratorySubject(t),
+    })),
+    studentContext: {
+      group: effectiveGroup,
+    },
+  });
+
+  const subjectAudit =
+    remainingResult.bySubject[targetSubjectCode] ||
+    Object.values(remainingResult.bySubject).find(
+      (s) => s.subjectName.toLowerCase() === targetSubjectCode.toLowerCase()
+    );
 
   const allInstances = generateScheduledClasses(calendar, timetable, asOf);
   // Filter instances matching targetSubjectCode either by matchedSubjectCode or subjectCode
@@ -279,7 +407,10 @@ export function calculateSubjectScheduleMetrics(
   );
 
   const passed = subjectInstances.filter((i) => i.isPassed);
-  const remaining = subjectInstances.filter((i) => !i.isPassed);
+
+  const remainingCount = subjectAudit
+    ? subjectAudit.remainingClasses
+    : subjectInstances.filter((i) => !i.isPassed).length;
 
   const asOfDateStr = toDateString(asOf);
   const asOfDate = parseDateString(asOfDateStr);
@@ -294,22 +425,43 @@ export function calculateSubjectScheduleMetrics(
   thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
   const thirtyDaysStr = toDateString(thirtyDaysLater);
 
-  const upcomingThisWeek = remaining.filter(
+  const upcomingRemaining = subjectInstances.filter(
+    (i) =>
+      !i.isPassed &&
+      i.date <= effectiveTeachingEndDate &&
+      (subjectAudit ? subjectAudit.countedDates.includes(i.date) : true)
+  );
+
+  const upcomingThisWeek = upcomingRemaining.filter(
     (i) => i.date >= asOfDateStr && i.date <= sevenDaysStr
   );
-  const upcomingThisMonth = remaining.filter(
+  const upcomingThisMonth = upcomingRemaining.filter(
     (i) => i.date >= asOfDateStr && i.date <= thirtyDaysStr
   );
 
+  const isGroupDivided = subjectAudit ? Boolean(subjectAudit.isGroupDivided) : false;
+
   return {
     subjectCode: targetSubjectCode,
-    totalScheduled: subjectInstances.length,
+    totalScheduled: passed.length + remainingCount,
     scheduledPassed: passed.length,
-    scheduledRemaining: remaining.length,
-    nextClass: remaining[0] || null,
+    scheduledRemaining: remainingCount,
+    isGroupDivided,
+    labRemaining:
+      isGroupDivided && subjectAudit && subjectAudit.remainingByGroup
+        ? {
+            G1: subjectAudit.remainingByGroup["G1"] ?? 0,
+            G2: subjectAudit.remainingByGroup["G2"] ?? 0,
+          }
+        : undefined,
+    remainingByGroup:
+      isGroupDivided && subjectAudit ? subjectAudit.remainingByGroup : null,
+    countedDates: subjectAudit?.countedDates,
+    nextClass: upcomingRemaining[0] || null,
     upcomingThisWeek,
     upcomingThisMonth,
     semesterEndDate: calendar.endDate,
+    teachingEndDate: effectiveTeachingEndDate,
   };
 }
 

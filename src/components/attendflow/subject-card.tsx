@@ -39,14 +39,28 @@ export function SubjectCard({
   index,
   onOpenSimulator,
   scheduledRemaining,
+  isGroupDivided,
+  labRemaining,
+  remainingByGroup,
+  selectedGroup,
 }: {
   subject: SubjectInfo;
   data: DashboardPayload;
   threshold: number;
   index: number;
   onOpenSimulator?: (code: string) => void;
-  scheduledRemaining?: number;
+  scheduledRemaining?: number | null;
+  isGroupDivided?: boolean;
+  labRemaining?: { G1: number; G2: number };
+  remainingByGroup?: Record<string, number> | null;
+  selectedGroup?: string;
 }) {
+  const isLab =
+    Boolean(isGroupDivided) ||
+    subject.subjectType === "Practical" ||
+    subject.subjectType === "Lab" ||
+    /lab|laboratory|practical/i.test(subject.subjectName) ||
+    /lab|laboratory|practical/i.test(subject.subjectCode);
   const level = pctColor(subject.percentage, threshold);
   const c = COLOR[level];
   const need = mustAttend(subject.attended, subject.total, threshold);
@@ -59,6 +73,69 @@ export function SubjectCard({
         .sort((a, b) => parsePortalDate(b.date) - parsePortalDate(a.date)),
     [data.logs, subject.subjectCode]
   );
+
+  const { presentCount, dutyLeaveCount, absentCount } = useMemo(() => {
+    let p = 0, d = 0, a = 0;
+    for (const l of subjectLogs) {
+      if (l.status === "DUTY_LEAVE") d++;
+      else if (l.status === "PRESENT") p++;
+      else if (l.status === "ABSENT") a++;
+    }
+    return { presentCount: p, dutyLeaveCount: d, absentCount: a };
+  }, [subjectLogs]);
+
+  const remainingLabel = useMemo(() => {
+    // If no calculation data exists at all, return empty
+    if (
+      typeof scheduledRemaining !== "number" &&
+      scheduledRemaining !== null &&
+      !remainingByGroup &&
+      !labRemaining
+    ) {
+      return "";
+    }
+
+    const groups = remainingByGroup || (labRemaining as Record<string, number> | undefined);
+    const hasGroupSplits = Boolean(isGroupDivided && groups && Object.keys(groups).length > 0);
+
+    // Condition B — Group-Divided Subjects (Labs / Tutorials with specific group splits)
+    if (hasGroupSplits && groups) {
+      const normToggle = (selectedGroup || "Both").trim().toUpperCase();
+
+      if (normToggle === "G1" && groups["G1"] !== undefined) {
+        return ` · ${groups["G1"]} scheduled classes remain (G1)`;
+      }
+
+      if (normToggle === "G2" && groups["G2"] !== undefined) {
+        return ` · ${groups["G2"]} scheduled classes remain (G2)`;
+      }
+
+      if (
+        normToggle !== "BOTH" &&
+        normToggle !== "UNKNOWN" &&
+        normToggle !== "" &&
+        groups[normToggle] !== undefined
+      ) {
+        return ` · ${groups[normToggle]} scheduled classes remain (${selectedGroup})`;
+      }
+
+      // When toggle is set to "Both" (or "Unknown"): render full group distribution dynamically
+      const entries = Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+      if (entries.length > 0) {
+        const breakdown = entries.map(([g, count]) => `${g}: ${count}`).join(" · ");
+        return ` · ${breakdown} scheduled classes remain`;
+      }
+    }
+
+    // Condition A — Unified / Non-Group Subjects (Lectures, unified classes, electives)
+    // Completely ignore selectedGroup toggle state!
+    // Render only the single remaining integer:
+    if (typeof scheduledRemaining === "number") {
+      return ` · ${scheduledRemaining} scheduled classes remain`;
+    }
+
+    return "";
+  }, [scheduledRemaining, isGroupDivided, remainingByGroup, labRemaining, selectedGroup]);
 
   return (
     <motion.div
@@ -105,17 +182,13 @@ export function SubjectCard({
               <span className="inline-flex items-center gap-1 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 font-medium text-amber-700 dark:text-amber-400">
                 <TrendingUp className="h-3 w-3" aria-hidden="true" />
                 Attend {need} in a row to reach {threshold}%
-                {typeof scheduledRemaining === "number" && scheduledRemaining > 0
-                  ? ` · ${scheduledRemaining} scheduled classes remain`
-                  : ""}
+                {remainingLabel}
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 rounded-md border border-emerald-600/25 bg-emerald-600/10 px-2 py-0.5 font-medium text-emerald-700 dark:text-emerald-400">
                 <SkipForward className="h-3 w-3" aria-hidden="true" />
                 Can skip {skip} and stay ≥ {threshold}%
-                {typeof scheduledRemaining === "number" && scheduledRemaining > 0
-                  ? ` · ${scheduledRemaining} scheduled classes remain`
-                  : ""}
+                {remainingLabel}
               </span>
             )}
           </div>
@@ -138,6 +211,11 @@ export function SubjectCard({
                   <DialogDescription>
                     {subject.attended} of {subject.total} classes attended ·{" "}
                     {subject.percentage.toFixed(1)}% attendance
+                    {dutyLeaveCount > 0 && (
+                      <span className="block mt-1 text-xs text-muted-foreground">
+                        {presentCount} Present · {dutyLeaveCount} Duty Leave · {absentCount} Absent
+                      </span>
+                    )}
                   </DialogDescription>
                 </DialogHeader>
                 <Separator />
@@ -160,12 +238,14 @@ export function SubjectCard({
                           <Badge
                             variant="outline"
                             className={
-                              l.status === "PRESENT"
+                              l.status === "DUTY_LEAVE"
+                                ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400 font-medium"
+                                : l.status === "PRESENT"
                                 ? "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
                                 : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400"
                             }
                           >
-                            {l.status}
+                            {l.status === "DUTY_LEAVE" ? "Duty Leave" : l.status === "PRESENT" ? "Present" : "Absent"}
                           </Badge>
                         </li>
                       ))}

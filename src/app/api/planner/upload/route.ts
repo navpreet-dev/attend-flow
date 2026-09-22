@@ -198,6 +198,7 @@ export async function POST(req: NextRequest) {
                         : "none",
                     needsReview: match.confidence === "none",
                     classType: cls.type || "THEORY",
+                    batch: cls.batch ? cls.batch.trim() : null,
                   };
                 }
               );

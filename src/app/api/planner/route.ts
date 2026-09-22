@@ -2,16 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionStudent } from "@/lib/session";
 import {
-  calculateSubjectScheduleMetrics,
+  calculateRemainingClasses,
+  isLaboratorySubject,
+  TEACHING_END_DATE,
   type AcademicCalendarConfig,
   type TimetableEntryItem,
+  type LabGroup,
 } from "@/lib/academic-planner";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const student = await getSessionStudent();
   if (!student) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
+
+  const { searchParams } = new URL(req.url);
+  const rawGroup = (searchParams.get("group") || "Unknown").toUpperCase();
+  const group: LabGroup = rawGroup === "G1" ? "G1" : rawGroup === "G2" ? "G2" : "Unknown";
+  const includeAudit = searchParams.get("audit") === "true";
 
   try {
     const calendar = await db.academicCalendar.findUnique({
@@ -45,8 +53,10 @@ export async function GET() {
     const calendarConfig: AcademicCalendarConfig = {
       startDate: calendar.startDate,
       endDate: calendar.endDate,
+      teachingEndDate: TEACHING_END_DATE,
       workingDays,
       timetableOffDays,
+      group,
       holidays: calendar.holidays.map((h) => ({
         id: h.id,
         date: h.date,
@@ -64,7 +74,47 @@ export async function GET() {
       room: t.room,
       teacher: t.teacher,
       matchedSubjectCode: t.matchedSubjectCode,
+      batch: (t as any).batch || null,
+      labGroup: ((t as any).batch as any) || null,
+      isLab: isLaboratorySubject(t),
     }));
+
+    const effectiveTeachingEndDate =
+      calendarConfig.teachingEndDate ||
+      (calendar.endDate && calendar.endDate < TEACHING_END_DATE
+        ? calendar.endDate
+        : TEACHING_END_DATE);
+
+    const remainingResult = calculateRemainingClasses({
+      now: new Date(),
+      timezone: "Asia/Kolkata",
+      calendar: {
+        startDate: calendar.startDate,
+        teachingEndDate: effectiveTeachingEndDate,
+        workingDays,
+        excludedDays: timetableOffDays,
+        holidays: calendar.holidays,
+      },
+      timetable: timetable.map((t) => ({
+        id: t.id,
+        dayOfWeek: t.dayOfWeek,
+        subjectCode: t.subjectCode,
+        subjectName: t.subjectName,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        room: t.room,
+        teacher: t.teacher,
+        matchedSubjectCode: t.matchedSubjectCode || t.subjectCode,
+        batch: (t as any).batch || null,
+        isLab: isLaboratorySubject(t),
+      })),
+      studentContext: {
+        group,
+        course: student.course,
+        section: student.section,
+        department: student.department,
+      },
+    });
 
     return NextResponse.json({
       configured: true,
@@ -72,6 +122,28 @@ export async function GET() {
       calendarSourceFileName: calendar.sourceFileName,
       timetable: timetableItems,
       timetableSourceFileName: timetable[0]?.sourceFileName || null,
+      remaining: {
+        timezone: remainingResult.timezone,
+        asOfDate: remainingResult.asOfDate,
+        asOfTime: remainingResult.asOfTime,
+        teachingEndDate: effectiveTeachingEndDate,
+        requestedGroup: group,
+        allDiscoveredGroups: remainingResult.allDiscoveredGroups,
+        theoryRemaining: remainingResult.theoryRemaining,
+        activeRemaining: remainingResult.activeRemaining,
+        totalRemainingByGroup: remainingResult.totalRemainingByGroup,
+        // Legacy compatibility properties
+        labRemaining: {
+          G1: remainingResult.totalRemainingByGroup["G1"] ?? 0,
+          G2: remainingResult.totalRemainingByGroup["G2"] ?? 0,
+        },
+        totalRemaining: {
+          G1: remainingResult.totalRemainingByGroup["G1"] ?? remainingResult.activeRemaining,
+          G2: remainingResult.totalRemainingByGroup["G2"] ?? remainingResult.activeRemaining,
+        },
+        bySubject: remainingResult.bySubject,
+        ...(includeAudit ? { scheduledInstances: remainingResult.scheduledInstances } : {}),
+      },
     });
   } catch (err) {
     console.error("[api/planner] Error fetching planner data:", err);
