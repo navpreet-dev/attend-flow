@@ -10,6 +10,7 @@ import {
   calculateRemainingClasses,
   getKolkataDateParts,
   isLaboratorySubject,
+  adaptLegacyTimetableEntries,
   type LabGroup,
   type EngineTimetableEntry,
   type DateIterationResult,
@@ -263,11 +264,21 @@ export function generateScheduledClasses(
   // if the timetable says Monday is off for this section it must be excluded.
   const timetableOffDaysSet = new Set<number>(calendar.timetableOffDays || []);
 
+  // Dynamically adapt timetable entries so G1/G2 batches are resolved for parallel labs
+  const adaptedTimetable = adaptLegacyTimetableEntries(
+    timetable.map((t) => ({
+      ...t,
+      matchedSubjectCode: t.matchedSubjectCode || t.subjectCode,
+      batch: t.batch || (t as any).labGroup || null,
+      isLab: isLaboratorySubject(t),
+    }))
+  );
+
   // Map timetable by day of week for fast lookup
   const dayMap = new Map<number, TimetableEntryItem[]>();
-  for (const entry of timetable) {
+  for (const entry of adaptedTimetable) {
     const list = dayMap.get(entry.dayOfWeek) || [];
-    list.push(entry);
+    list.push(entry as TimetableEntryItem);
     dayMap.set(entry.dayOfWeek, list);
   }
 
@@ -398,7 +409,7 @@ export function calculateSubjectScheduleMetrics(
       (s) => s.subjectName.toLowerCase() === targetSubjectCode.toLowerCase()
     );
 
-  const allInstances = generateScheduledClasses(calendar, timetable, asOf);
+  const allInstances = generateScheduledClasses(calendar, timetable, asOf, effectiveGroup);
   // Filter instances matching targetSubjectCode either by matchedSubjectCode or subjectCode
   const subjectInstances = allInstances.filter(
     (inst) =>

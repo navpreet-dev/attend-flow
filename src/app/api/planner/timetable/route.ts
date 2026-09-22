@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
       room?: string | null;
       teacher?: string | null;
       matchedSubjectCode?: string | null;
+      batch?: string | null;
+      labGroup?: string | null;
     }>;
     sourceFileName?: string;
     /**

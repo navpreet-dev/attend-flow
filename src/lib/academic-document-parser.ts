@@ -6,6 +6,7 @@
  */
 
 import { matchTimetableSubject } from "./academic-planner";
+import { adaptLegacyTimetableEntries } from "./date-iteration-engine";
 
 export interface ParsedTimetableEntry {
   id: string; // temp client key
@@ -673,6 +674,14 @@ export function parseTimetableDocument(
       matchConfidence,
       needsReview,
     });
+  }
+
+  // Dynamically adapt parallel sessions to G1/G2 batches
+  const adapted = adaptLegacyTimetableEntries(entries as any);
+  for (let idx = 0; idx < entries.length; idx++) {
+    if (adapted[idx]?.batch) {
+      entries[idx].batch = adapted[idx].batch;
+    }
   }
 
   // Generate summary

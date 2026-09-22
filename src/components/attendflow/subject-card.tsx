@@ -88,7 +88,6 @@ export function SubjectCard({
     // If no calculation data exists at all, return empty
     if (
       typeof scheduledRemaining !== "number" &&
-      scheduledRemaining !== null &&
       !remainingByGroup &&
       !labRemaining
     ) {
@@ -102,12 +101,14 @@ export function SubjectCard({
     if (hasGroupSplits && groups) {
       const normToggle = (selectedGroup || "Both").trim().toUpperCase();
 
-      if (normToggle === "G1" && groups["G1"] !== undefined) {
-        return ` · ${groups["G1"]} scheduled classes remain (G1)`;
+      if (normToggle === "G1") {
+        const count = groups["G1"] !== undefined ? groups["G1"] : (typeof scheduledRemaining === "number" ? scheduledRemaining : 0);
+        return ` · ${count} scheduled classes remain (G1)`;
       }
 
-      if (normToggle === "G2" && groups["G2"] !== undefined) {
-        return ` · ${groups["G2"]} scheduled classes remain (G2)`;
+      if (normToggle === "G2") {
+        const count = groups["G2"] !== undefined ? groups["G2"] : (typeof scheduledRemaining === "number" ? scheduledRemaining : 0);
+        return ` · ${count} scheduled classes remain (G2)`;
       }
 
       if (
@@ -128,8 +129,7 @@ export function SubjectCard({
     }
 
     // Condition A — Unified / Non-Group Subjects (Lectures, unified classes, electives)
-    // Completely ignore selectedGroup toggle state!
-    // Render only the single remaining integer:
+    // Completely ignore selectedGroup toggle state! Never display G1/G2 text for lectures.
     if (typeof scheduledRemaining === "number") {
       return ` · ${scheduledRemaining} scheduled classes remain`;
     }

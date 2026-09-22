@@ -9,6 +9,7 @@ import {
   type TimetableEntryItem,
   type LabGroup,
 } from "@/lib/academic-planner";
+import { adaptLegacyTimetableEntries } from "@/lib/date-iteration-engine";
 
 export async function GET(req: NextRequest) {
   const student = await getSessionStudent();
@@ -64,7 +65,25 @@ export async function GET(req: NextRequest) {
       })),
     };
 
-    const timetableItems: TimetableEntryItem[] = timetable.map((t) => ({
+    // Dynamic Runtime Adapter: ensures batch tags (G1, G2) are assigned to parallel lab sessions
+    // even if database records lacked explicit tags or if a student logged in before migration.
+    const adaptedTimetable = adaptLegacyTimetableEntries(
+      timetable.map((t) => ({
+        id: t.id,
+        dayOfWeek: t.dayOfWeek,
+        subjectCode: t.subjectCode,
+        subjectName: t.subjectName,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        room: t.room,
+        teacher: t.teacher,
+        matchedSubjectCode: t.matchedSubjectCode || t.subjectCode,
+        batch: (t as any).batch || null,
+        isLab: isLaboratorySubject(t),
+      }))
+    );
+
+    const timetableItems: TimetableEntryItem[] = adaptedTimetable.map((t) => ({
       id: t.id,
       dayOfWeek: t.dayOfWeek,
       subjectCode: t.subjectCode,
@@ -74,9 +93,9 @@ export async function GET(req: NextRequest) {
       room: t.room,
       teacher: t.teacher,
       matchedSubjectCode: t.matchedSubjectCode,
-      batch: (t as any).batch || null,
-      labGroup: ((t as any).batch as any) || null,
-      isLab: isLaboratorySubject(t),
+      batch: t.batch || null,
+      labGroup: (t.batch as any) || null,
+      isLab: t.isLab ?? isLaboratorySubject(t),
     }));
 
     const effectiveTeachingEndDate =
@@ -95,19 +114,7 @@ export async function GET(req: NextRequest) {
         excludedDays: timetableOffDays,
         holidays: calendar.holidays,
       },
-      timetable: timetable.map((t) => ({
-        id: t.id,
-        dayOfWeek: t.dayOfWeek,
-        subjectCode: t.subjectCode,
-        subjectName: t.subjectName,
-        startTime: t.startTime,
-        endTime: t.endTime,
-        room: t.room,
-        teacher: t.teacher,
-        matchedSubjectCode: t.matchedSubjectCode || t.subjectCode,
-        batch: (t as any).batch || null,
-        isLab: isLaboratorySubject(t),
-      })),
+      timetable: adaptedTimetable,
       studentContext: {
         group,
         course: student.course,

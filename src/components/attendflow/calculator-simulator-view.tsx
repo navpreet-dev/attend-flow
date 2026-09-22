@@ -51,12 +51,20 @@ import {
   calculateSubjectScheduleMetrics,
   generateScheduledClasses,
 } from "@/lib/academic-planner";
+import {
+  adaptLegacyTimetableEntries,
+  extractEntryGroups,
+} from "@/lib/date-iteration-engine";
 
 interface CalculatorSimulatorViewProps {
   data: DashboardPayload;
   threshold: number;
   initialSelectedSubjectCode?: string | null;
   plannerState?: PlannerState | null;
+  isGroupDividedMap?: Record<string, boolean>;
+  labRemainingMap?: Record<string, { G1: number; G2: number }>;
+  remainingByGroupMap?: Record<string, Record<string, number> | null>;
+  scheduledRemainingMap?: Record<string, number>;
 }
 
 export function CalculatorSimulatorView({
@@ -64,6 +72,10 @@ export function CalculatorSimulatorView({
   threshold,
   initialSelectedSubjectCode,
   plannerState,
+  isGroupDividedMap,
+  labRemainingMap,
+  remainingByGroupMap,
+  scheduledRemainingMap,
 }: CalculatorSimulatorViewProps) {
   const [activeSubTab, setActiveSubTab] = useState<"simulator" | "recovery">("simulator");
 
@@ -121,22 +133,6 @@ export function CalculatorSimulatorView({
     return "Both";
   }, []);
 
-  // Resolve group-divided metadata from the DashboardPayload subject list (universally data-driven)
-  const isCurrentSubjectGroupDivided = useMemo(() => {
-    if (selectedSubjectCode === "CUSTOM") return false;
-    const s = data.subjects.find((x) => x.subjectCode === selectedSubjectCode);
-    if (!s) return false;
-    // Use the isGroupDivided flag propagated from the date-iteration engine, or fall back to
-    // checking whether remainingByGroup has more than one group key.
-    // Cast through unknown because SubjectInfo doesn't have an index signature; these extra
-    // fields are attached by the dashboard enrichment pipeline at runtime.
-    const sAny = s as unknown as Record<string, unknown>;
-    if (sAny.isGroupDivided === true) return true;
-    const rbg = sAny.remainingByGroup as Record<string, number> | null | undefined;
-    if (rbg && Object.keys(rbg).length > 0) return true;
-    return false;
-  }, [selectedSubjectCode, data.subjects]);
-
   // Derive timetable schedule metrics for currently selected subject if planner configured.
   // For group-divided subjects, pass the local simulator toggle (simulatorLabGroup), otherwise
   // fall back to the globally saved group preference.
@@ -147,9 +143,7 @@ export function CalculatorSimulatorView({
     if (selectedSubjectCode === "CUSTOM") {
       return null;
     }
-    const groupArg = isCurrentSubjectGroupDivided
-      ? (simulatorLabGroup ?? "Both")
-      : savedGroup;
+    const groupArg = simulatorLabGroup ?? savedGroup;
     return calculateSubjectScheduleMetrics(
       selectedSubjectCode,
       plannerState.calendar,
@@ -157,38 +151,70 @@ export function CalculatorSimulatorView({
       new Date(),
       groupArg
     );
-  }, [plannerState, selectedSubjectCode, savedGroup, isCurrentSubjectGroupDivided, simulatorLabGroup]);
+  }, [plannerState, selectedSubjectCode, savedGroup, simulatorLabGroup]);
+
+  // Resolve group-divided metadata from precomputed maps or timetable inspection (universally data-driven)
+  const isCurrentSubjectGroupDivided = useMemo(() => {
+    if (selectedSubjectCode === "CUSTOM") return false;
+    // 1. Direct from dashboard map if available
+    if (isGroupDividedMap && isGroupDividedMap[selectedSubjectCode] !== undefined) {
+      return Boolean(isGroupDividedMap[selectedSubjectCode]);
+    }
+    // 2. Direct from timetable metrics
+    if (timetableMetrics?.isGroupDivided) return true;
+    if (timetableMetrics?.remainingByGroup && Object.keys(timetableMetrics.remainingByGroup).length > 0) return true;
+    // 3. Fallback: inspect timetable entries for this subject with legacy adaptation
+    if (plannerState?.timetable) {
+      const adapted = adaptLegacyTimetableEntries(plannerState.timetable as any);
+      const subEntries = adapted.filter(
+        (e) => (e.matchedSubjectCode || e.subjectCode) === selectedSubjectCode
+      );
+      return subEntries.some((e) => {
+        const g = extractEntryGroups(e);
+        return Boolean(g && g.length > 0);
+      });
+    }
+    return false;
+  }, [selectedSubjectCode, isGroupDividedMap, timetableMetrics, plannerState]);
 
   // effectiveRemainingClasses — the single source of truth for scheduler math in this view.
   // For unified (theory) subjects: use scheduledRemaining directly.
   // For group-divided (lab) subjects: use the count for the selected simulatorLabGroup.
   // If the group toggle is null (not chosen yet), default to 0 to avoid misleading forecasts.
   const effectiveRemainingClasses = useMemo(() => {
-    if (!timetableMetrics) return 0;
+    if (selectedSubjectCode === "CUSTOM") return 0;
     if (isCurrentSubjectGroupDivided) {
       if (!simulatorLabGroup) return 0; // user hasn't chosen a group yet
-      const rbg = timetableMetrics.remainingByGroup;
-      if (rbg && typeof rbg[simulatorLabGroup] === "number") {
-        return rbg[simulatorLabGroup];
-      }
-      return timetableMetrics.scheduledRemaining; // fallback
+      const count =
+        timetableMetrics?.remainingByGroup?.[simulatorLabGroup] ??
+        remainingByGroupMap?.[selectedSubjectCode]?.[simulatorLabGroup] ??
+        (simulatorLabGroup === "G1"
+          ? (timetableMetrics?.labRemaining?.G1 ?? labRemainingMap?.[selectedSubjectCode]?.G1)
+          : (timetableMetrics?.labRemaining?.G2 ?? labRemainingMap?.[selectedSubjectCode]?.G2));
+      return Math.max(0, count ?? 0);
     }
-    return timetableMetrics.scheduledRemaining;
-  }, [timetableMetrics, isCurrentSubjectGroupDivided, simulatorLabGroup]);
+    return Math.max(
+      0,
+      timetableMetrics?.scheduledRemaining ?? (scheduledRemainingMap?.[selectedSubjectCode] ?? 0)
+    );
+  }, [
+    selectedSubjectCode,
+    isCurrentSubjectGroupDivided,
+    simulatorLabGroup,
+    timetableMetrics,
+    remainingByGroupMap,
+    labRemainingMap,
+    scheduledRemainingMap,
+  ]);
 
-  // When subject changes, prefill the Recovery Calculator's remaining-classes input
+  // When subject, group toggle, or effectiveRemainingClasses changes, update Recovery input
   useEffect(() => {
-    if (timetableMetrics) {
-      const rem = effectiveRemainingClasses;
-      if (rem > 0) {
-        setRemainingClassesInput(String(rem));
-      } else if (!isCurrentSubjectGroupDivided) {
-        // For theory subjects with 0 remaining, clear the field so it doesn't mislead
-        setRemainingClassesInput("");
-      }
+    if (effectiveRemainingClasses > 0) {
+      setRemainingClassesInput(String(effectiveRemainingClasses));
+    } else if (!isCurrentSubjectGroupDivided) {
+      setRemainingClassesInput("");
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timetableMetrics, isCurrentSubjectGroupDivided]);
+  }, [effectiveRemainingClasses, isCurrentSubjectGroupDivided]);
 
   // Resolve currently active subject data
   const currentSubjectInfo = useMemo(() => {

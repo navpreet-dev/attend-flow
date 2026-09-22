@@ -738,6 +738,10 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
               threshold={threshold}
               initialSelectedSubjectCode={selectedToolSubject}
               plannerState={plannerState}
+              isGroupDividedMap={isGroupDividedMap}
+              labRemainingMap={labRemainingMap}
+              remainingByGroupMap={remainingByGroupMap}
+              scheduledRemainingMap={scheduledRemainingMap}
             />
           </TabsContent>
 
