@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
     new Set(
       rawOffDays
         .map((d) => {
-          const upper = (d || "").toUpperCase().trim();
+          const upper = String(d ?? "").toUpperCase().trim();
           // Accept either day name ("MONDAY") or numeric string ("1")
           if (DAY_NAME_TO_NUM[upper] !== undefined) return DAY_NAME_TO_NUM[upper];
           const n = parseInt(upper, 10);

@@ -71,6 +71,7 @@ import { SubjectCard } from "./subject-card";
 import { TrendsCharts } from "./trends-chart";
 import { CalculatorSimulatorView } from "./calculator-simulator-view";
 import { AcademicPlannerView } from "./academic-planner-view";
+import { OverviewTimetableCard } from "./overview-timetable-card";
 import { NotificationsPopover } from "./notifications-popover";
 import { SyncSummaryDialog } from "./sync-summary-dialog";
 import { generateSyncSummary, type SyncSummary } from "@/lib/sync-summary";
@@ -177,22 +178,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
     };
   }, [plannerState, data.subjects, selectedGroup]);
 
-  // Today and Tomorrow upcoming classes preview
-  const { todayClasses, tomorrowClasses } = useMemo(() => {
-    if (!plannerState?.calendar || !plannerState?.timetable || plannerState.timetable.length === 0) {
-      return { todayClasses: [], tomorrowClasses: [] };
-    }
-    const today = new Date();
-    const todayStr = toDateString(today);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = toDateString(tomorrow);
 
-    const all = generateScheduledClasses(plannerState.calendar, plannerState.timetable, today, selectedGroup);
-    const todayClasses = all.filter((c) => c.date === todayStr);
-    const tomorrowClasses = all.filter((c) => c.date === tomorrowStr);
-    return { todayClasses, tomorrowClasses };
-  }, [plannerState, selectedGroup]);
 
   const runSync = useCallback(
     async (silent = false) => {
@@ -593,64 +579,13 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
           {/* Overview */}
           <TabsContent value="overview" className="mt-0 space-y-4">
-            {/* Upcoming Classes Preview (Timetable) */}
-            {(todayClasses.length > 0 || tomorrowClasses.length > 0) && (
-              <div className="card-premium rounded-2xl border border-emerald-500/25 bg-gradient-to-r from-emerald-500/[0.04] to-teal-500/[0.04] p-4 sm:p-5">
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
-                    <CalendarDays className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">Upcoming Classes (Timetable)</h3>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("planner")}
-                    className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:underline"
-                  >
-                    View Timetable →
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="rounded-xl border border-border/60 bg-card/60 p-3">
-                    <p className="font-semibold text-muted-foreground mb-1.5 text-[11px] uppercase tracking-wider">Today</p>
-                    {todayClasses.length === 0 ? (
-                      <p className="text-muted-foreground italic">No classes scheduled today.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {todayClasses.map((c, i) => (
-                          <div key={i} className="flex items-center justify-between gap-2">
-                            <span className="font-medium text-foreground truncate" title={c.subjectName}>
-                              {c.subjectName}
-                            </span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] shrink-0">
-                              {formatTime12Hour(c.startTime)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="rounded-xl border border-border/60 bg-card/60 p-3">
-                    <p className="font-semibold text-muted-foreground mb-1.5 text-[11px] uppercase tracking-wider">Tomorrow</p>
-                    {tomorrowClasses.length === 0 ? (
-                      <p className="text-muted-foreground italic">No classes scheduled tomorrow.</p>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {tomorrowClasses.map((c, i) => (
-                          <div key={i} className="flex items-center justify-between gap-2">
-                            <span className="font-medium text-foreground truncate" title={c.subjectName}>
-                              {c.subjectName}
-                            </span>
-                            <span className="font-mono text-emerald-600 dark:text-emerald-400 font-semibold text-[11px] shrink-0">
-                              {formatTime12Hour(c.startTime)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Interactive Timetable: Today & Tomorrow */}
+            <OverviewTimetableCard
+              plannerState={plannerState}
+              selectedGroup={selectedGroup}
+              onGroupChange={handleGroupChange}
+              onOpenPlanner={() => setActiveTab("planner")}
+            />
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>

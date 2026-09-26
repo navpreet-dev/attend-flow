@@ -397,6 +397,7 @@ export function AcademicPlannerView({
         room: e.room,
         teacher: e.teacher,
         matchedSubjectCode: e.matchedSubjectCode,
+        batch: (e as any).batch || null,
       }));
 
       // Pass detected off-days so they are persisted to the AcademicCalendar record
