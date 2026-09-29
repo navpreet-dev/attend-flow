@@ -38,7 +38,7 @@ export function AboutDialog({ children }: AboutDialogProps) {
 
       <AnimatePresence>
         {open && (
-          <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="About AttendFlow">
+          <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="About AttendAGC">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
@@ -72,7 +72,12 @@ export function AboutDialog({ children }: AboutDialogProps) {
                   <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-lg shadow-emerald-600/25 ring-1 ring-emerald-700/20">
                     <GraduationCap className="h-7 w-7" aria-hidden="true" />
                   </div>
-                  <h2 className="font-display text-xl font-semibold tracking-tight">About AttendFlow</h2>
+                  <h2 className="font-display text-xl tracking-tight">
+                    About{" "}
+                    <span className="font-display tracking-tight whitespace-nowrap shrink-0">
+                      <span className="brand-attend">Attend</span><span className="brand-agc">AGC</span>
+                    </span>
+                  </h2>
                   <p className="mx-auto max-w-sm text-sm leading-relaxed text-muted-foreground">
                     Autonomous attendance tracking for AGC ERP students. Live data
                     from the college portal — no manual entry, ever. Free for
@@ -104,13 +109,13 @@ export function AboutDialog({ children }: AboutDialogProps) {
                     <p className="text-sm font-semibold tracking-tight">Support the project</p>
                   </div>
                   <p className="text-sm leading-relaxed text-muted-foreground">
-                    AttendFlow is completely free for every AGC student. If it helps
+                    AttendAGC is completely free for every AGC student. If it helps
                     you stay exam-eligible and saves you the daily portal login,
                     consider supporting the development — every contribution keeps
                     the servers running and the syncs fast.
                   </p>
                   <a
-                    href="mailto:navpreet70095@gmail.com?subject=AttendFlow%20—%20Support%20the%20project"
+                    href="mailto:navpreet70095@gmail.com?subject=AttendAGC%20—%20Support%20the%20project"
                     className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white shadow-md shadow-emerald-600/20 transition-colors hover:bg-emerald-700"
                   >
                     <Mail className="h-3.5 w-3.5" aria-hidden="true" />
@@ -126,7 +131,7 @@ export function AboutDialog({ children }: AboutDialogProps) {
                   <div className="space-y-1.5">
                     <p className="text-sm font-semibold tracking-tight">Privacy &amp; honesty</p>
                     <p className="text-xs leading-relaxed text-muted-foreground">
-                      AttendFlow only reads your own attendance from{" "}
+                      AttendAGC only reads your own attendance from{" "}
                       <span className="font-mono text-[11px]">agclms.in</span> using the
                       credentials you enter. Passwords are stored AES-256 encrypted,
                       only if you opt in. Not an official AGC product.
@@ -144,7 +149,7 @@ export function AboutDialog({ children }: AboutDialogProps) {
                 </div>
 
                 <p className="pt-1 text-center text-[11px] text-muted-foreground">
-                  AttendFlow v1.0 · Made with intent, not templates
+                  AttendAGC v1.0 · Made with intent, not templates
                 </p>
               </div>
             </motion.div>

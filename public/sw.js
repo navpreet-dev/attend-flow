@@ -14,10 +14,10 @@ self.addEventListener("push", (event) => {
   try {
     data = event.data ? event.data.json() : {};
   } catch {
-    data = { title: "AttendFlow", body: event.data ? event.data.text() : "" };
+    data = { title: "AttendAGC", body: event.data ? event.data.text() : "" };
   }
 
-  const title = data.title || "AttendFlow";
+  const title = data.title || "AttendAGC";
   const options = {
     body: data.body || "",
     tag: data.tag || "attendflow",

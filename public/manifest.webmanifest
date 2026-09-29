@@ -1,6 +1,6 @@
 {
-  "name": "AttendFlow — AGC Attendance Tracker",
-  "short_name": "AttendFlow",
+  "name": "AttendAGC — AGC Attendance Tracker",
+  "short_name": "AttendAGC",
   "description": "Autonomous college attendance tracking for AGC ERP students. Live portal sync, trends and low-attendance alerts.",
   "start_url": "/",
   "scope": "/",

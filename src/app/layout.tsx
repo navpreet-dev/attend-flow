@@ -23,11 +23,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AttendFlow — AGC ERP Attendance Tracker",
+  title: "AttendAGC — AGC ERP Attendance Tracker",
   description:
     "Autonomous college attendance tracking for Amritsar Group of Colleges. Sign in with your AGC ERP student credentials to auto-fetch live attendance, trends, low-attendance warnings and exports — no manual entry.",
   keywords: [
-    "AttendFlow",
+    "AttendAGC",
     "AGC ERP",
     "agclms.in",
     "attendance tracker",
@@ -41,7 +41,7 @@ export const metadata: Metadata = {
   },
   appleWebApp: {
     capable: true,
-    title: "AttendFlow",
+    title: "AttendAGC",
     statusBarStyle: "black-translucent",
   },
 };

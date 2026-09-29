@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { formatTime12Hour, cn } from "@/lib/utils";
-import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -318,48 +317,75 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
     [data.logs]
   );
 
+  const profileName = data.profile?.name?.trim();
+  const profileId = data.profile?.rollNo?.trim();
+  const profileDept = (data.profile?.course || data.profile?.department)?.trim();
+  const profileSection = data.profile?.section?.trim();
+
+  const desktopHeaderLine1 = [profileName, profileId].filter(Boolean).join(" · ");
+  const desktopHeaderLine2 = [profileDept, profileSection].filter(Boolean).join(" · ");
+
+  const mobileHeaderLine2 = [profileDept, profileSection, profileId].filter(Boolean).join(" · ");
+  const headerLine2Title = [profileName, profileDept, profileSection, profileId].filter(Boolean).join(" · ");
+
   return (
-    <div className="flex-1">
+    <div className="flex-1 min-w-0">
       {/* ------------------------------- Header ------------------------------- */}
-      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/85 backdrop-blur-md supports-[backdrop-filter]:bg-background/70">
-        <div className="mx-auto flex max-w-6xl items-center gap-3 px-4 py-2.5 sm:py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-md shadow-emerald-600/20">
-            <GraduationCap className="h-5 w-5" aria-hidden="true" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate font-display text-[15px] font-semibold leading-tight tracking-tight">
-              AttendFlow
-              <span className="ml-2.5 hidden text-xs font-medium text-muted-foreground sm:inline">
-                {data.profile?.name} · {data.profile?.rollNo}
-              </span>
-            </p>
-            <p className="truncate text-[11px] text-muted-foreground">
-              {data.profile?.course} · {data.profile?.section}
-            </p>
+      <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-lg supports-[backdrop-filter]:bg-background/75">
+        <div className="mx-auto flex max-w-6xl items-center gap-2 sm:gap-3 px-2 min-[360px]:px-2.5 sm:px-4 py-2 sm:py-2.5">
+          {/* Brand mark icon */}
+          <div className="flex h-8 w-8 min-[360px]:h-9 min-[360px]:w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+            <GraduationCap className="h-4.5 w-4.5 sm:h-5 sm:w-5" aria-hidden="true" />
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* Middle text block: Line 1 = AttendAGC (+ Name on desktop), Line 2 = Dept · Section · ID */}
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-display text-sm leading-tight tracking-tight">
+              <span className="font-display tracking-tight whitespace-nowrap shrink-0">
+                <span className="brand-attend">Attend</span><span className="brand-agc">AGC</span>
+              </span>
+              {desktopHeaderLine1 && (
+                <span className="ml-2 hidden text-xs font-medium text-muted-foreground sm:inline font-sans">
+                  {desktopHeaderLine1}
+                </span>
+              )}
+            </p>
+            {headerLine2Title && (
+              <p className="truncate text-xs sm:text-[11px] text-muted-foreground leading-snug" title={headerLine2Title}>
+                <span className="sm:hidden">{mobileHeaderLine2}</span>
+                <span className="hidden sm:inline">{desktopHeaderLine2}</span>
+              </p>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             <Button
               variant="outline"
               size="sm"
               onClick={() => runSync()}
               disabled={syncing}
-              className="gap-1.5"
+              className="h-9 w-9 sm:h-9 sm:w-auto p-0 sm:px-3 gap-1.5 rounded-lg shrink-0"
               aria-label="Sync attendance now"
             >
               {syncing ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" aria-hidden="true" />
               ) : (
-                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                <RefreshCw className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
               )}
-              <span className="hidden sm:inline">{syncing ? "Syncing…" : "Sync"}</span>
+              <span className="hidden sm:inline text-xs">{syncing ? "Syncing…" : "Sync"}</span>
             </Button>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="gap-1.5" aria-label="Export data">
-                  <FileDown className="h-4 w-4" aria-hidden="true" />
-                  <span className="hidden sm:inline">Export</span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 w-9 sm:h-9 sm:w-auto p-0 sm:px-3 gap-1.5 rounded-lg shrink-0"
+                  aria-label="Export data"
+                >
+                  <FileDown className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
+                  <span className="hidden sm:inline text-xs">Export</span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
@@ -393,7 +419,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
               size="icon"
               onClick={handleLogout}
               aria-label="Log out"
-              className="rounded-full text-muted-foreground hover:text-foreground"
+              className="h-9 w-9 rounded-full text-muted-foreground hover:text-foreground shrink-0"
             >
               <LogOut className="h-[1.15rem] w-[1.15rem]" aria-hidden="true" />
             </Button>
@@ -401,16 +427,16 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 space-y-6">
+      <main className="mx-auto max-w-6xl px-3 sm:px-4 py-4 sm:py-5 space-y-4 sm:space-y-5 min-w-0">
         {/* Offline / error banners */}
         {offline && (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.07] px-3.5 py-2.5 text-xs sm:text-sm text-amber-800 dark:text-amber-300">
             <WifiOff className="h-4 w-4 shrink-0" aria-hidden="true" />
             You&apos;re offline — showing your last saved snapshot from this device.
           </div>
         )}
         {data.lastSyncOk === false && (
-          <div className="flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-800 dark:text-rose-300">
+          <div className="flex items-center gap-2 rounded-lg border border-rose-500/25 bg-rose-500/[0.07] px-3.5 py-2.5 text-xs sm:text-sm text-rose-800 dark:text-rose-300">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
             The last sync attempt couldn&apos;t reach the portal. Press Sync to retry.
           </div>
@@ -418,66 +444,65 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
         {/* Low attendance warning */}
         {lowSubjects.length > 0 && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.99 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="card-premium max-w-full overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] to-rose-500/[0.08] p-4 sm:p-5"
+          <div
+            className="overflow-hidden rounded-lg border border-amber-500/25 bg-amber-500/[0.06] p-3.5 sm:p-4"
             role="alert"
           >
-            <div className="flex items-start gap-3.5">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" aria-hidden="true" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="font-display text-[15px] font-semibold tracking-tight text-amber-800 dark:text-amber-300">
-                  Low attendance warning — {lowSubjects.length} subject{lowSubjects.length === 1 ? "" : "s"} below {threshold}%
+                <p className="text-sm font-semibold tracking-tight text-amber-800 dark:text-amber-300">
+                  {lowSubjects.length} subject{lowSubjects.length === 1 ? "" : "s"} below {threshold}%
                 </p>
-                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                <div className="mt-2 flex flex-wrap gap-1.5">
                   {lowSubjects.slice(0, 6).map((s) => (
                     <Badge
                       key={s.subjectCode}
                       variant="outline"
-                      className="max-w-full whitespace-normal break-words border-amber-500/30 bg-background/60 text-left leading-relaxed"
+                      className="max-w-full whitespace-normal break-words border-amber-500/25 bg-background/60 text-left text-xs leading-relaxed"
                     >
                       {s.subjectName} · {s.percentage.toFixed(1)}% · attend next {mustAttend(s.attended, s.total, threshold)}
                     </Badge>
                   ))}
                   {lowSubjects.length > 6 && (
-                    <Badge variant="outline" className="border-amber-500/30 bg-background/60">
+                    <Badge variant="outline" className="border-amber-500/25 bg-background/60 text-xs">
                       +{lowSubjects.length - 6} more
                     </Badge>
                   )}
                 </div>
                 {!data.settings.notifyLow && (
-                  <Button size="sm" variant="outline" className="mt-3" onClick={enableNotifications}>
+                  <Button size="sm" variant="outline" className="mt-2.5 text-xs" onClick={enableNotifications}>
                     <BellRing className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                     Get notified when attendance drops
                   </Button>
                 )}
               </div>
             </div>
-          </motion.div>
+          </div>
         )}
 
         {/* ------------------------------ Stat cards ---------------------------- */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="card-premium rounded-2xl border-border/60">
-            <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
-                <TrendingUp className="h-3.5 w-3.5" aria-hidden="true" /> Overall attendance
+        <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-4">
+          {/* Hero stat — overall attendance */}
+          <Card className="card-premium col-span-2 rounded-xl border-border/70 p-3.5 sm:p-4 sm:col-span-1 flex flex-col justify-between">
+            <CardHeader className="p-0 space-y-1">
+              <CardDescription className="text-xs font-medium text-muted-foreground">
+                Overall attendance
               </CardDescription>
-              <CardTitle className={`font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums ${overallColor}`}>
+              <CardTitle className={`font-display text-3xl font-bold leading-none tracking-tight tabular-nums ${overallColor}`}>
                 {overall.total > 0 ? `${overall.percentage.toFixed(1)}%` : "—"}
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-0">
+            <CardContent className="p-0 pt-2 space-y-1.5">
               <Progress
                 value={overall.percentage}
                 aria-label={`Overall attendance ${overall.percentage.toFixed(1)} percent`}
                 className="h-1.5"
                 style={{ color: overallLevel === "ok" ? "#10b981" : overallLevel === "warn" ? "#f59e0b" : "#f43f5e" }}
               />
-              <p className="mt-2 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {overallNeed > 0
                   ? `Attend next ${overallNeed} to reach ${threshold}%`
                   : `Can skip ${overallSkip} and stay ≥ ${threshold}%`}
@@ -485,97 +510,148 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
             </CardContent>
           </Card>
 
-          <Card className="card-premium rounded-2xl border-border/60">
-            <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
-                <CalendarCheck2 className="h-3.5 w-3.5" aria-hidden="true" /> Classes attended
+          {/* Classes attended */}
+          <Card className="card-premium rounded-xl border-border/70 p-3.5 sm:p-4 flex flex-col justify-start">
+            <CardHeader className="p-0 space-y-1">
+              <CardDescription className="text-xs font-medium text-muted-foreground">
+                Classes attended
               </CardDescription>
-              <CardTitle className="font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
+              <CardTitle className="font-display text-2xl font-bold leading-none tracking-tight tabular-nums">
                 {overall.attended}
-                <span className="text-lg font-medium text-muted-foreground">/{overall.total}</span>
+                <span className="text-sm font-medium text-muted-foreground">/{overall.total}</span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-0">
-              <p className="text-xs text-muted-foreground">
+            <CardContent className="p-0 pt-1.5">
+              <p className="text-[11px] text-muted-foreground">
                 {overall.total - overall.attended} missed
-                {overallDutyLeave > 0 ? ` · ${overallDutyLeave} duty leave` : ""} across {data.subjects.length} subjects
+                {overallDutyLeave > 0 ? ` · ${overallDutyLeave} DL` : ""}
               </p>
             </CardContent>
           </Card>
 
-          <Card className="card-premium rounded-2xl border-border/60">
-            <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
-                <ListChecks className="h-3.5 w-3.5" aria-hidden="true" /> Subjects on track
+          {/* On track */}
+          <Card className="card-premium rounded-xl border-border/70 p-3.5 sm:p-4 flex flex-col justify-start">
+            <CardHeader className="p-0 space-y-1">
+              <CardDescription className="text-xs font-medium text-muted-foreground">
+                On track
               </CardDescription>
-              <CardTitle className="font-display text-[2.1rem] font-bold leading-none tracking-tight tabular-nums">
+              <CardTitle className="font-display text-2xl font-bold leading-none tracking-tight tabular-nums">
                 {data.subjects.length - lowSubjects.length}
-                <span className="text-lg font-medium text-muted-foreground">/{data.subjects.length}</span>
+                <span className="text-sm font-medium text-muted-foreground">/{data.subjects.length}</span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="pt-0">
-              <p className="text-xs text-muted-foreground">
+            <CardContent className="p-0 pt-1.5">
+              <p className="text-[11px] text-muted-foreground">
                 {lowSubjects.length === 0
-                  ? "Everything above target — keep it up!"
+                  ? "All above target"
                   : `${lowSubjects.length} need attention`}
               </p>
             </CardContent>
           </Card>
 
-          <Card className="card-premium rounded-2xl border-border/60">
-            <CardHeader className="pb-1">
-              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.11em]">
-                <Clock3 className="h-3.5 w-3.5" aria-hidden="true" /> Last synced
-              </CardDescription>
-              <CardTitle className="font-display text-xl font-semibold leading-snug tracking-tight">
+          {/* Last synced — compact row on mobile, standard on desktop */}
+          <Card className="card-premium col-span-2 rounded-xl border-border/70 p-3.5 sm:p-4 sm:col-span-1 flex flex-col justify-start">
+            {/* Mobile view (<sm): compact row */}
+            <div className="flex sm:hidden items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Last synced</p>
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground mt-0.5">
+                  {data.lastSyncOk === true ? (
+                    <>
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" aria-hidden="true" />
+                      Live from agclms.in
+                    </>
+                  ) : data.lastSyncOk === false ? (
+                    <>
+                      <AlertTriangle className="h-3 w-3 text-rose-500" aria-hidden="true" />
+                      Failed — retry
+                    </>
+                  ) : (
+                    "Awaiting first sync"
+                  )}
+                </p>
+              </div>
+              <p className="font-display text-xs font-semibold tabular-nums text-foreground">
                 {data.lastSyncAt ? fmtDateTime(data.lastSyncAt) : "Never"}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                {data.lastSyncOk === true ? (
-                  <>
-                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" aria-hidden="true" />
-                    Live from agclms.in
-                  </>
-                ) : data.lastSyncOk === false ? (
-                  <>
-                    <AlertTriangle className="h-3.5 w-3.5 text-rose-500" aria-hidden="true" />
-                    Last attempt failed — retry
-                  </>
-                ) : (
-                  "Awaiting first sync"
-                )}
               </p>
-            </CardContent>
+            </div>
+
+            {/* Desktop view (>=sm): standard card */}
+            <div className="hidden sm:block space-y-1">
+              <CardHeader className="p-0 space-y-1">
+                <CardDescription className="text-xs font-medium text-muted-foreground">
+                  Last synced
+                </CardDescription>
+                <CardTitle className="font-display text-lg font-semibold leading-snug tracking-tight">
+                  {data.lastSyncAt ? fmtDateTime(data.lastSyncAt) : "Never"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0 pt-1">
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  {data.lastSyncOk === true ? (
+                    <>
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" aria-hidden="true" />
+                      Live from agclms.in
+                    </>
+                  ) : data.lastSyncOk === false ? (
+                    <>
+                      <AlertTriangle className="h-3 w-3 text-rose-500" aria-hidden="true" />
+                      Failed — retry
+                    </>
+                  ) : (
+                    "Awaiting first sync"
+                  )}
+                </p>
+              </CardContent>
+            </div>
           </Card>
         </div>
 
         {/* -------------------------------- Tabs -------------------------------- */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
-          <TabsList className="scrollbar-slim h-11 w-full justify-start overflow-x-auto rounded-xl bg-muted/50 p-1">
-            <TabsTrigger value="overview" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
-              <LayoutDashboard className="h-4 w-4" aria-hidden="true" /> Overview
-            </TabsTrigger>
-            <TabsTrigger value="tools" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
-              <Calculator className="h-4 w-4" aria-hidden="true" /> Calculator &amp; Simulator
-            </TabsTrigger>
-            <TabsTrigger value="trends" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
-              <TrendingUp className="h-4 w-4" aria-hidden="true" /> Trends
-            </TabsTrigger>
-            <TabsTrigger value="history" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
-              <History className="h-4 w-4" aria-hidden="true" /> History
-            </TabsTrigger>
-            <TabsTrigger value="planner" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
-              <CalendarDays className="h-4 w-4" aria-hidden="true" /> Academic Planner
-              {plannerState?.configured && (
-                <span className="ml-1 h-2 w-2 rounded-full bg-emerald-500" title="Timetable Active" />
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="settings" className="gap-1.5 rounded-lg px-2.5 text-xs font-medium sm:px-4 sm:text-[13px]">
-              <Settings2 className="h-4 w-4" aria-hidden="true" /> Settings
-            </TabsTrigger>
-          </TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4 min-w-0">
+          <div className="mask-fade-right w-full overflow-hidden">
+            <TabsList className="scrollbar-slim flex h-12 w-full justify-start overflow-x-auto snap-x rounded-lg surface-inset p-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <TabsTrigger
+                value="overview"
+                className="shrink-0 whitespace-nowrap snap-start min-h-10 px-3 text-xs font-medium rounded-md"
+              >
+                Overview
+              </TabsTrigger>
+              <TabsTrigger
+                value="tools"
+                className="shrink-0 whitespace-nowrap snap-start min-h-10 px-3 text-xs font-medium rounded-md"
+              >
+                Calculator
+              </TabsTrigger>
+              <TabsTrigger
+                value="trends"
+                className="shrink-0 whitespace-nowrap snap-start min-h-10 px-3 text-xs font-medium rounded-md"
+              >
+                Trends
+              </TabsTrigger>
+              <TabsTrigger
+                value="history"
+                className="shrink-0 whitespace-nowrap snap-start min-h-10 px-3 text-xs font-medium rounded-md"
+              >
+                History
+              </TabsTrigger>
+              <TabsTrigger
+                value="planner"
+                className="shrink-0 whitespace-nowrap snap-start min-h-10 px-3 text-xs font-medium rounded-md"
+              >
+                Planner
+                {plannerState?.configured && (
+                  <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-primary" title="Timetable Active" />
+                )}
+              </TabsTrigger>
+              <TabsTrigger
+                value="settings"
+                className="shrink-0 whitespace-nowrap snap-start min-h-10 px-3 text-xs font-medium rounded-md"
+              >
+                Settings
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
           {/* Overview */}
           <TabsContent value="overview" className="mt-0 space-y-4">
@@ -589,61 +665,40 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="font-display text-lg font-semibold tracking-tight">Subject-wise attendance</h2>
-                <p className="text-xs text-muted-foreground">
-                  Target: <span className="font-semibold text-foreground">{threshold}%</span> · tap any card for the full class log
+                <h2 className="text-sm font-semibold tracking-tight">Subject-wise attendance</h2>
+                <p className="text-[11px] text-muted-foreground">
+                  Target: <span className="font-medium text-foreground">{threshold}%</span> · tap any card for details
                 </p>
               </div>
               {plannerState?.configured && (
-                <div className="flex items-center gap-1 rounded-xl border border-border/70 bg-card/80 p-1 text-xs shadow-xs">
-                  <span className="px-2 text-[11px] font-medium text-muted-foreground">Lab Group:</span>
-                  <button
-                    type="button"
-                    onClick={() => handleGroupChange("Both")}
-                    className={cn(
-                      "rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors",
-                      selectedGroup === "Both"
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    Both
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleGroupChange("G1")}
-                    className={cn(
-                      "rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors",
-                      selectedGroup === "G1"
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    G1
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleGroupChange("G2")}
-                    className={cn(
-                      "rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors",
-                      selectedGroup === "G2"
-                        ? "bg-emerald-600 text-white shadow-xs"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    G2
-                  </button>
+                <div className="flex items-center gap-0.5 rounded-lg surface-inset p-0.5 text-xs">
+                  <span className="px-2 text-[11px] font-medium text-muted-foreground">Lab:</span>
+                  {(["Both", "G1", "G2"] as const).map((g) => (
+                    <button
+                      key={g}
+                      type="button"
+                      onClick={() => handleGroupChange(g)}
+                      className={cn(
+                        "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors duration-150 active:scale-[0.98]",
+                        selectedGroup === g
+                          ? "bg-background text-foreground border border-border/70 shadow-2xs font-semibold"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {g}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
             {data.subjects.length === 0 ? (
-              <Card>
+              <Card className="rounded-xl">
                 <CardContent className="py-10 text-center text-sm text-muted-foreground">
                   No subjects found. Press <span className="font-semibold text-foreground">Sync</span> to re-fetch from the portal.
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {data.subjects.map((s, i) => (
                   <SubjectCard
                     key={s.subjectCode}
@@ -753,7 +808,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                               variant="outline"
                               className={
                                 l.status === "DUTY_LEAVE"
-                                  ? "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-400 font-medium"
+                                  ? "border-border bg-muted/60 text-muted-foreground font-medium"
                                   : l.status === "PRESENT"
                                   ? "border-emerald-600/25 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400"
                                   : "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-400"
@@ -803,7 +858,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                     <div>
                       <p className="text-sm font-medium">Daily auto-sync</p>
                       <p className="text-xs text-muted-foreground">
-                        Refresh automatically whenever you open AttendFlow with saved credentials.
+                        Refresh automatically whenever you open AttendAGC with saved credentials.
                       </p>
                     </div>
                     <Switch
@@ -851,7 +906,7 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">Account &amp; security</CardTitle>
-                  <CardDescription>How AttendFlow protects your data.</CardDescription>
+                  <CardDescription>How AttendAGC protects your data.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   <div className="flex items-start gap-2.5">
@@ -880,15 +935,15 @@ export function DashboardView({ data, offline, onData, onLogout }: DashboardView
                   <Separator />
                   <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
                     <dt className="text-muted-foreground">Student</dt>
-                    <dd className="font-medium">{data.profile?.name} ({data.profile?.rollNo})</dd>
+                    <dd className="font-medium min-w-0 break-words">{data.profile?.name} {data.profile?.rollNo ? `(${data.profile.rollNo})` : ""}</dd>
                     <dt className="text-muted-foreground">Course</dt>
-                    <dd className="font-medium">{data.profile?.course}</dd>
+                    <dd className="font-medium min-w-0 break-words">{data.profile?.course || "—"}</dd>
                     <dt className="text-muted-foreground">Section</dt>
-                    <dd className="font-medium">{data.profile?.section}</dd>
+                    <dd className="font-medium min-w-0 break-words">{data.profile?.section || "—"}</dd>
                     <dt className="text-muted-foreground">Department</dt>
-                    <dd className="font-medium">{data.profile?.department}</dd>
+                    <dd className="font-medium min-w-0 break-words">{data.profile?.department || "—"}</dd>
                     <dt className="text-muted-foreground">Class incharge</dt>
-                    <dd className="font-medium">{data.profile?.incharge}</dd>
+                    <dd className="font-medium min-w-0 break-words">{data.profile?.incharge || "—"}</dd>
                   </dl>
                   <Separator />
                   <Button variant="destructive" size="sm" className="w-full" onClick={handleLogout}>
