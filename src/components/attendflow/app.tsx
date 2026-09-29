@@ -155,10 +155,12 @@ export function AttendFlowApp() {
 
       <footer className="mt-auto border-t border-border/70 py-4">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-2 px-4 text-xs text-muted-foreground sm:flex-row">
-          <p>
-            <span className="font-display font-semibold text-foreground">AttendFlow</span>
-            <span className="mx-1.5 text-border">·</span>
-            autonomous attendance tracking for AGC ERP students
+          <p className="flex items-center flex-wrap gap-x-1.5">
+            <span className="font-display tracking-tight whitespace-nowrap shrink-0">
+              <span className="brand-attend">Attend</span><span className="brand-agc">AGC</span>
+            </span>
+            <span className="text-border">·</span>
+            <span>autonomous attendance tracking for AGC ERP students</span>
           </p>
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline">Made by Navpreet Singh</span>

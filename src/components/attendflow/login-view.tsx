@@ -41,44 +41,38 @@ export function LoginView({ onLogin }: LoginViewProps) {
   }
 
   return (
-    <div className="relative flex-1 overflow-hidden">
-      {/* Ambient jade glow — quiet, not loud */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-32 right-[-10%] h-[26rem] w-[26rem] rounded-full bg-emerald-500/[0.07] blur-3xl" />
-        <div className="absolute bottom-[-12rem] left-[-8%] h-[24rem] w-[24rem] rounded-full bg-teal-500/[0.06] blur-3xl" />
-      </div>
-
-      <div className="relative mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-5 py-12 sm:px-8 sm:py-16">
+    <div className="relative flex-1">
+      <div className="relative mx-auto flex w-full max-w-6xl flex-1 items-center justify-center px-4 py-8 sm:px-8 sm:py-16">
         <motion.div
-          initial={{ opacity: 0, y: 14 }}
+          initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
           className="grid w-full max-w-5xl items-center gap-10 lg:grid-cols-[1.1fr_1fr] lg:gap-16"
         >
           {/* Left: brand + pitch */}
           <div className="order-2 space-y-8 text-center lg:order-1 lg:text-left">
             <div className="inline-flex items-center gap-2.5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-lg shadow-emerald-600/25">
-                <GraduationCap className="h-5.5 w-5.5" aria-hidden="true" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <GraduationCap className="h-5 w-5" aria-hidden="true" />
               </div>
-              <span className="font-display text-xl font-semibold tracking-tight">AttendFlow</span>
+              <span className="font-display text-xl tracking-tight whitespace-nowrap shrink-0">
+                <span className="brand-attend">Attend</span><span className="brand-agc">AGC</span>
+              </span>
             </div>
 
-            <div className="space-y-4">
-              <h1 className="font-display text-[2rem] font-bold leading-[1.12] tracking-[-0.02em] text-balance sm:text-4xl lg:text-[2.75rem]">
+            <div className="space-y-3">
+              <h1 className="font-display text-[1.85rem] font-bold leading-[1.15] tracking-[-0.025em] text-balance sm:text-[2.25rem] lg:text-[2.65rem]">
                 Your AGC attendance,{" "}
-                <span className="bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent dark:from-emerald-400 dark:to-teal-400">
-                  tracked automatically.
-                </span>
+                tracked automatically.
               </h1>
               <p className="mx-auto max-w-xl text-[15px] leading-relaxed text-muted-foreground sm:text-base lg:mx-0">
-                Sign in with your AGC ERP credentials — AttendFlow reads your live
+                Sign in with your AGC ERP credentials — AttendAGC reads your live
                 subject-wise attendance straight from the college portal. No manual
                 entry, ever. Every department, every course, every section.
               </p>
             </div>
 
-            <div className="grid gap-3 text-left sm:grid-cols-2">
+            <div className="grid gap-2.5 text-left sm:grid-cols-2">
               {[
                 { icon: RefreshCw, title: "Auto-sync", desc: "Live data pulled from agclms.in every day" },
                 { icon: ShieldCheck, title: "Encrypted", desc: "Credentials sealed with AES-256-GCM" },
@@ -87,13 +81,13 @@ export function LoginView({ onLogin }: LoginViewProps) {
               ].map((f) => (
                 <div
                   key={f.title}
-                  className="flex items-start gap-3 rounded-xl border border-border/70 bg-card/60 p-3.5 backdrop-blur-sm transition-colors hover:border-emerald-600/25"
+                  className="flex items-start gap-3 rounded-lg border border-border/80 bg-card/50 p-3 transition-colors hover:bg-accent/40"
                 >
-                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600/10 text-emerald-600 dark:text-emerald-500">
-                    <f.icon className="h-4 w-4" aria-hidden="true" />
+                  <div className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <f.icon className="h-3.5 w-3.5" aria-hidden="true" />
                   </div>
                   <div className="space-y-0.5">
-                    <p className="text-sm font-semibold tracking-tight">{f.title}</p>
+                    <p className="text-sm font-medium tracking-tight">{f.title}</p>
                     <p className="text-xs leading-snug text-muted-foreground">{f.desc}</p>
                   </div>
                 </div>
@@ -101,28 +95,28 @@ export function LoginView({ onLogin }: LoginViewProps) {
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-2 lg:justify-start">
-              <Badge variant="secondary" className="rounded-full px-3 font-medium">All departments</Badge>
-              <Badge variant="secondary" className="rounded-full px-3 font-medium">All courses</Badge>
-              <Badge variant="secondary" className="rounded-full px-3 font-medium">All sections</Badge>
+              <Badge variant="secondary" className="rounded-full px-3 text-xs font-medium">All departments</Badge>
+              <Badge variant="secondary" className="rounded-full px-3 text-xs font-medium">All courses</Badge>
+              <Badge variant="secondary" className="rounded-full px-3 text-xs font-medium">All sections</Badge>
             </div>
           </div>
 
           {/* Right: login card */}
-          <Card className="card-premium order-1 w-full max-w-md justify-self-center rounded-2xl border-border/60 lg:order-2">
-            <CardHeader className="space-y-1.5 pb-4 pt-8">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-700 text-white shadow-lg shadow-emerald-600/25 ring-1 ring-emerald-700/20">
-                <Lock className="h-6 w-6" aria-hidden="true" />
+          <Card className="card-premium order-1 w-full max-w-md justify-self-center rounded-xl border-border/70 lg:order-2">
+            <CardHeader className="space-y-1.5 p-5 pb-3 sm:px-6 sm:pb-4 sm:pt-7">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+                <Lock className="h-5 w-5" aria-hidden="true" />
               </div>
-              <CardTitle className="pt-3 text-center font-display text-xl tracking-tight">
+              <CardTitle className="pt-2.5 text-center font-display text-lg tracking-tight">
                 Student Login
               </CardTitle>
-              <CardDescription className="text-center text-sm">
+              <CardDescription className="text-center text-[13px]">
                 Use the same roll number &amp; password as the college portal
               </CardDescription>
             </CardHeader>
-            <CardContent className="px-6 pb-8">
-              <form onSubmit={handleSubmit} className="space-y-5" noValidate>
-                <div className="space-y-2">
+            <CardContent className="p-5 pt-0 sm:px-6 sm:pb-7">
+              <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+                <div className="space-y-1.5">
                   <Label htmlFor="rollNo" className="text-[13px] font-medium">Univ. Roll No / Student ID</Label>
                   <Input
                     id="rollNo"
@@ -132,11 +126,11 @@ export function LoginView({ onLogin }: LoginViewProps) {
                     value={rollNo}
                     onChange={(e) => setRollNo(e.target.value)}
                     disabled={loading}
-                    className="h-11 rounded-xl bg-card"
+                    className="h-10 rounded-lg bg-card text-base sm:text-sm"
                     required
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <Label htmlFor="password" className="text-[13px] font-medium">Portal Password</Label>
                   <Input
                     id="password"
@@ -147,7 +141,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     disabled={loading}
-                    className="h-11 rounded-xl bg-card"
+                    className="h-10 rounded-lg bg-card text-base sm:text-sm"
                     required
                   />
                 </div>
@@ -158,7 +152,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
                     checked={remember}
                     onCheckedChange={(v) => setRemember(v === true)}
                     disabled={loading}
-                    className="mt-0.5 h-4.5 w-4.5"
+                    className="mt-0.5 h-4 w-4"
                   />
                   <div className="space-y-0.5">
                     <Label htmlFor="remember" className="cursor-pointer text-[13px] font-medium leading-snug">
@@ -175,7 +169,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
                     role="alert"
-                    className="rounded-xl border border-destructive/25 bg-destructive/[0.08] px-3.5 py-2.5 text-sm leading-relaxed text-destructive"
+                    className="rounded-lg border border-destructive/25 bg-destructive/[0.08] px-3.5 py-2.5 text-sm leading-relaxed text-destructive"
                   >
                     {error}
                   </motion.p>
@@ -184,7 +178,7 @@ export function LoginView({ onLogin }: LoginViewProps) {
                 <Button
                   type="submit"
                   disabled={loading}
-                  className="h-12 w-full rounded-xl bg-emerald-600 text-[15px] font-semibold tracking-tight text-white shadow-lg shadow-emerald-600/25 transition-all hover:bg-emerald-700 hover:shadow-emerald-600/30 active:scale-[0.99]"
+                  className="min-h-11 w-full rounded-lg text-[14px] font-semibold tracking-tight transition-colors duration-150 ease-out active:scale-[0.98]"
                 >
                   {loading ? (
                     <>
@@ -197,9 +191,9 @@ export function LoginView({ onLogin }: LoginViewProps) {
                 </Button>
               </form>
 
-              <Separator className="my-6" />
+              <Separator className="my-5" />
               <p className="text-center text-xs leading-relaxed text-muted-foreground">
-                AttendFlow logs in to <span className="font-mono text-[11px]">agclms.in</span> on your
+                AttendAGC logs in to <span className="font-mono text-[11px]">agclms.in</span> on your
                 behalf and reads only your own attendance data. Your password is never
                 shared with anyone and is stored encrypted only if you tick
                 &quot;Remember me&quot;.

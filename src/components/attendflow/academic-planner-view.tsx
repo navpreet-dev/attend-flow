@@ -453,7 +453,7 @@ export function AcademicPlannerView({
         calendar: null,
         timetable: [],
       });
-      toast.success("Academic planner cleared. AttendFlow restored to default.");
+      toast.success("Academic planner cleared. AttendAGC restored to default.");
       onPlannerUpdated?.();
     } catch (err) {
       toast.error("Failed to clear planner data.");
@@ -541,7 +541,7 @@ export function AcademicPlannerView({
               Upload Timetable & Academic Calendar
             </h2>
             <p className="text-sm text-muted-foreground max-w-2xl">
-              Upload your existing timetable and academic calendar. AttendFlow automatically
+              Upload your existing timetable and academic calendar. AttendAGC automatically
               reads them, detects your weekly schedule and holidays, and uses them to power smart recovery
               and bunk simulations.
             </p>
@@ -1146,7 +1146,7 @@ export function AcademicPlannerView({
         <p>
           <strong className="text-foreground">Planning calculation note:</strong> Timetable and calendar
           schedules are user-provided planning data. Real-world classes may be rescheduled, canceled, or
-          have extra sessions by faculty. AttendFlow uses this information strictly for mathematical
+          have extra sessions by faculty. AttendAGC uses this information strictly for mathematical
           projections.
         </p>
       </div>
