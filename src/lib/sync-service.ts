@@ -65,7 +65,9 @@ export async function getDashboardData(studentDbId: string): Promise<DashboardPa
     logs: logs.map<LogInfo>((l) => ({
       subjectCode: l.subjectCode,
       subjectName: subjectNames.get(l.subjectCode),
-      date: l.date,
+      // Strip the |N occurrence suffix added for extra-lecture dedup —
+      // the UI should always see a clean dd-MM-yyyy date string.
+      date: l.date.replace(/\|\d+$/, ""),
       status: l.status as "PRESENT" | "ABSENT" | "DUTY_LEAVE",
     })),
     settings: {
@@ -115,62 +117,74 @@ export async function persistSnapshot(
     },
   });
 
-  for (const s of snapshot.subjects) {
-    if (!s.reportOk) continue;
-    await db.subjectAttendance.upsert({
-      where: {
-        studentId_subjectCode: { studentId: studentDbId, subjectCode: s.subjectCode },
-      },
-      create: {
-        studentId: studentDbId,
-        subjectCode: s.subjectCode,
-        subjectName: s.subjectName,
-        subjectType: s.subjectType,
-        saId: s.saId,
-        attended: s.attended,
-        total: s.total,
-        percentage: s.percentage,
-        lastUpdated: new Date(),
-      },
-      update: {
-        subjectName: s.subjectName,
-        subjectType: s.subjectType,
-        saId: s.saId,
-        attended: s.attended,
-        total: s.total,
-        percentage: s.percentage,
-        lastUpdated: new Date(),
-      },
-    });
-  }
+  // Parallel subject upserts — each hits a distinct unique key so there
+  // are no write conflicts. Avoids serial await overhead per subject.
+  await Promise.all(
+    snapshot.subjects
+      .filter((s) => s.reportOk)
+      .map((s) =>
+        db.subjectAttendance.upsert({
+          where: {
+            studentId_subjectCode: { studentId: studentDbId, subjectCode: s.subjectCode },
+          },
+          create: {
+            studentId: studentDbId,
+            subjectCode: s.subjectCode,
+            subjectName: s.subjectName,
+            subjectType: s.subjectType,
+            saId: s.saId,
+            attended: s.attended,
+            total: s.total,
+            percentage: s.percentage,
+            lastUpdated: new Date(),
+          },
+          update: {
+            subjectName: s.subjectName,
+            subjectType: s.subjectType,
+            saId: s.saId,
+            attended: s.attended,
+            total: s.total,
+            percentage: s.percentage,
+            lastUpdated: new Date(),
+          },
+        })
+      )
+  );
 
   const existingLogs = await db.attendanceLog.findMany({
     where: { studentId: studentDbId },
     select: { subjectCode: true, date: true, status: true },
   });
+  // Keys include the |N occurrence suffix when present, so extra-lecture rows
+  // are stored and looked up distinctly from normal single-lecture rows.
   const existingMap = new Map(existingLogs.map((l) => [`${l.subjectCode}|${l.date}`, l.status]));
-  const seen = new Set<string>();
   const newLogs: typeof snapshot.logs = [];
+  const updatePromises: Promise<unknown>[] = [];
   for (const l of snapshot.logs) {
+    // Each log.date is already unique within a subject's parse output because
+    // parseAttendanceReport suffixes duplicate dates with |2, |3, etc.
     const key = `${l.subjectCode}|${l.date}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
     const existingStatus = existingMap.get(key);
     if (!existingStatus) {
       newLogs.push(l);
     } else if (existingStatus !== l.status) {
-      await db.attendanceLog.update({
-        where: {
-          studentId_subjectCode_date: {
-            studentId: studentDbId,
-            subjectCode: l.subjectCode,
-            date: l.date,
+      // Status corrected on the portal (e.g. duty leave applied retroactively).
+      updatePromises.push(
+        db.attendanceLog.update({
+          where: {
+            studentId_subjectCode_date: {
+              studentId: studentDbId,
+              subjectCode: l.subjectCode,
+              date: l.date,
+            },
           },
-        },
-        data: { status: l.status },
-      });
+          data: { status: l.status },
+        })
+      );
     }
   }
+  // Fire all status corrections in parallel then insert new rows in one batch.
+  await Promise.all(updatePromises);
   if (newLogs.length > 0) {
     await db.attendanceLog.createMany({
       data: newLogs.map((l) => ({
@@ -319,64 +333,69 @@ export async function syncStudent(
         },
       });
 
-      // Upsert subjects (skip subjects whose report failed — keep last real values)
-      for (const s of snapshot.subjects) {
-        if (!s.reportOk) continue;
-        await db.subjectAttendance.upsert({
-          where: {
-            studentId_subjectCode: { studentId: studentDbId, subjectCode: s.subjectCode },
-          },
-          create: {
-            studentId: studentDbId,
-            subjectCode: s.subjectCode,
-            subjectName: s.subjectName,
-            subjectType: s.subjectType,
-            saId: s.saId,
-            attended: s.attended,
-            total: s.total,
-            percentage: s.percentage,
-            lastUpdated: new Date(),
-          },
-          update: {
-            subjectName: s.subjectName,
-            subjectType: s.subjectType,
-            saId: s.saId,
-            attended: s.attended,
-            total: s.total,
-            percentage: s.percentage,
-            lastUpdated: new Date(),
-          },
-        });
-      }
+      // Upsert subjects in parallel (skip subjects whose report failed — keep last real values).
+      await Promise.all(
+        snapshot.subjects
+          .filter((s) => s.reportOk)
+          .map((s) =>
+            db.subjectAttendance.upsert({
+              where: {
+                studentId_subjectCode: { studentId: studentDbId, subjectCode: s.subjectCode },
+              },
+              create: {
+                studentId: studentDbId,
+                subjectCode: s.subjectCode,
+                subjectName: s.subjectName,
+                subjectType: s.subjectType,
+                saId: s.saId,
+                attended: s.attended,
+                total: s.total,
+                percentage: s.percentage,
+                lastUpdated: new Date(),
+              },
+              update: {
+                subjectName: s.subjectName,
+                subjectType: s.subjectType,
+                saId: s.saId,
+                attended: s.attended,
+                total: s.total,
+                percentage: s.percentage,
+                lastUpdated: new Date(),
+              },
+            })
+          )
+      );
 
-      // Log rows (dedup on subject+date, safely update if status changed on portal)
+      // Log rows: keys include the |N suffix for extra-lecture dedup.
+      // Status corrections and new inserts are batched for speed.
       const existingLogs = await db.attendanceLog.findMany({
         where: { studentId: studentDbId },
         select: { subjectCode: true, date: true, status: true },
       });
       const existingMap = new Map(existingLogs.map((l) => [`${l.subjectCode}|${l.date}`, l.status]));
-      const seen = new Set<string>();
       const newLogs: typeof snapshot.logs = [];
+      const updatePromises: Promise<unknown>[] = [];
       for (const l of snapshot.logs) {
         const key = `${l.subjectCode}|${l.date}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
         const existingStatus = existingMap.get(key);
         if (!existingStatus) {
           newLogs.push(l);
         } else if (existingStatus !== l.status) {
-          await db.attendanceLog.update({
-            where: {
-              studentId_subjectCode_date: {
-                studentId: studentDbId,
-                subjectCode: l.subjectCode,
-                date: l.date,
+          updatePromises.push(
+            db.attendanceLog.update({
+              where: {
+                studentId_subjectCode_date: {
+                  studentId: studentDbId,
+                  subjectCode: l.subjectCode,
+                  date: l.date,
+                },
               },
-            },
-            data: { status: l.status },
-          });
+              data: { status: l.status },
+            })
+          );
         }
       }
+      await Promise.all(updatePromises);
       if (newLogs.length > 0) {
         await db.attendanceLog.createMany({
           data: newLogs.map((l) => ({

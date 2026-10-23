@@ -602,6 +602,13 @@ function parseAttendanceReport(html: string): { attended: number; total: number;
 
   const scope = tbodies.length > 0 ? tbodies.join("\n") : html;
 
+  // Track how many times each date appears within this subject's report.
+  // When a teacher takes an extra lecture on the same day, the portal shows
+  // two rows for the same date. We suffix the second occurrence with |2, the
+  // third with |3, etc., so each row gets a unique (subjectCode, date) key in
+  // the database without violating the @@unique constraint.
+  const dateSeen = new Map<string, number>();
+
   const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   let tr: RegExpExecArray | null;
   while ((tr = trRe.exec(scope)) !== null) {
@@ -620,9 +627,17 @@ function parseAttendanceReport(html: string): { attended: number; total: number;
 
     total += 1;
     if (status === "PRESENT" || status === "DUTY_LEAVE") attended += 1;
+
+    const baseDate = `${dm[1]}-${dm[2]}-${dm[3]}`;
+    const occurrence = (dateSeen.get(baseDate) ?? 0) + 1;
+    dateSeen.set(baseDate, occurrence);
+    // First occurrence keeps the plain date; extras get a |N suffix so the
+    // DB unique key (studentId, subjectCode, date) remains distinct.
+    const dateKey = occurrence === 1 ? baseDate : `${baseDate}|${occurrence}`;
+
     logs.push({
       subjectCode: "", // filled by caller
-      date: `${dm[1]}-${dm[2]}-${dm[3]}`,
+      date: dateKey,
       status,
     });
   }
