@@ -353,33 +353,38 @@ export function AcademicPlannerView({
 
   // Quick 1-Click: Load Amritsar Group of Colleges BCA-3B Schedule
   function handleLoadAmritsarTemplate() {
-    const parsedCalendar = parseAcademicCalendarDocument(
-      "AMRITSAR GROUP OF COLLEGES w.e.f. 15.07.2026",
-      "amritsar_calendar.pdf"
-    );
-    const parsedTimetable = parseTimetableDocument(
-      "AMRITSAR GROUP OF COLLEGES BCA-3B",
-      "amritsar_timetable.png",
-      agcSubjectOptions.map((s) => ({ subjectCode: s.code, subjectName: s.name }))
-    );
+    try {
+      const parsedCalendar = parseAcademicCalendarDocument(
+        "AMRITSAR GROUP OF COLLEGES w.e.f. 15.07.2026",
+        "amritsar_calendar.pdf"
+      );
+      const parsedTimetable = parseTimetableDocument(
+        "Amritsar Group of Colleges Class Wise Time Table BCA-3rd Semester (Section B)",
+        "amritsar_timetable.png",
+        agcSubjectOptions.map((s) => ({ subjectCode: s.code, subjectName: s.name })),
+        "BCA-3-B"
+      );
 
-    setReviewCalendar({
-      fileName: "Amritsar Group of Colleges Academic Calendar 2026.pdf",
-      startDate: parsedCalendar.startDate,
-      endDate: parsedCalendar.endDate,
-      workingDays: parsedCalendar.workingDays,
-      holidays: parsedCalendar.holidays,
-      extractedVia: "pdf-parse",
-      notes: parsedCalendar.notes,
-    });
+      setReviewCalendar({
+        fileName: "Amritsar Group of Colleges Academic Calendar 2026.pdf",
+        startDate: parsedCalendar.startDate,
+        endDate: parsedCalendar.endDate,
+        workingDays: parsedCalendar.workingDays,
+        holidays: parsedCalendar.holidays,
+        extractedVia: "pdf-parse",
+        notes: parsedCalendar.notes,
+      });
 
-    setReviewTimetable({
-      fileName: "BCA-3rd Semester (Section B) Time Table.png",
-      entries: parsedTimetable.entries,
-      extractedVia: "tesseract",
-    });
+      setReviewTimetable({
+        fileName: "BCA-3rd Semester (Section B) Time Table.png",
+        entries: parsedTimetable.entries,
+        extractedVia: "tesseract",
+      });
 
-    toast.success("Loaded Amritsar Group of Colleges BCA-3B schedule! Review and save below.");
+      toast.success("Loaded Amritsar Group of Colleges BCA-3B schedule! Review and save below.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load sample schedule");
+    }
   }
 
   // Save Confirmed Timetable
@@ -532,11 +537,6 @@ export function AcademicPlannerView({
       <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-card via-card to-primary/5 p-5 sm:p-6 shadow-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-              <Sparkles className="h-3 w-3" />
-              <span>Smart Academic Planner</span>
-              <span className="text-muted-foreground">· Optional Planning Tool</span>
-            </div>
             <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
               Upload Timetable & Academic Calendar
             </h2>
@@ -627,11 +627,10 @@ export function AcademicPlannerView({
                 const file = e.dataTransfer.files?.[0];
                 if (file) processTimetableFile(file);
               }}
-              className={`group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center gap-2 ${
-                isDraggingTimetable
-                  ? "border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]"
-                  : "border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5"
-              }`}
+              className={`group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center gap-2 ${isDraggingTimetable
+                ? "border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]"
+                : "border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5"
+                }`}
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-background shadow-xs group-hover:scale-105 transition-transform text-primary">
                 {uploadingTimetable ? (
@@ -645,10 +644,10 @@ export function AcademicPlannerView({
                   {uploadingTimetable
                     ? uploadStepMessage || "Scanning timetable..."
                     : isDraggingTimetable
-                    ? "Drop timetable file here"
-                    : plannerState.timetable.length > 0
-                    ? "Upload New Timetable to Replace"
-                    : "Choose or Drag Timetable File"}
+                      ? "Drop timetable file here"
+                      : plannerState.timetable.length > 0
+                        ? "Upload New Timetable to Replace"
+                        : "Choose or Drag Timetable File"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Supports: <strong className="text-foreground/80 font-medium">PDF, JPG, JPEG, PNG, DOC, DOCX</strong>
@@ -726,11 +725,10 @@ export function AcademicPlannerView({
                 const file = e.dataTransfer.files?.[0];
                 if (file) processCalendarFile(file);
               }}
-              className={`group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center gap-2 ${
-                isDraggingCalendar
-                  ? "border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]"
-                  : "border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5"
-              }`}
+              className={`group cursor-pointer rounded-xl border-2 border-dashed p-6 transition-all text-center flex flex-col items-center justify-center gap-2 ${isDraggingCalendar
+                ? "border-primary bg-primary/10 ring-2 ring-primary/30 scale-[1.01]"
+                : "border-border/80 hover:border-primary/60 bg-muted/20 hover:bg-primary/5"
+                }`}
             >
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-background shadow-xs group-hover:scale-105 transition-transform text-primary">
                 {uploadingCalendar ? (
@@ -744,10 +742,10 @@ export function AcademicPlannerView({
                   {uploadingCalendar
                     ? uploadStepMessage || "Scanning calendar..."
                     : isDraggingCalendar
-                    ? "Drop academic calendar file here"
-                    : plannerState.calendar
-                    ? "Upload New Calendar to Replace"
-                    : "Choose or Drag Academic Calendar File"}
+                      ? "Drop academic calendar file here"
+                      : plannerState.calendar
+                        ? "Upload New Calendar to Replace"
+                        : "Choose or Drag Academic Calendar File"}
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Supports: <strong className="text-foreground/80 font-medium">PDF, JPG, JPEG, PNG, DOC, DOCX</strong>
@@ -831,11 +829,10 @@ export function AcademicPlannerView({
                     {entry.classType && (
                       <Badge
                         variant="outline"
-                        className={`text-[10px] uppercase font-mono px-1.5 py-0 ${
-                          entry.classType === "LABORATORY"
-                            ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold"
-                            : "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400"
-                        }`}
+                        className={`text-[10px] uppercase font-mono px-1.5 py-0 ${entry.classType === "LABORATORY"
+                          ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 font-semibold"
+                          : "border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400"
+                          }`}
                       >
                         {entry.classType === "LABORATORY" ? "Lab" : "Theory"}
                       </Badge>

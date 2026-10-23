@@ -452,7 +452,7 @@ export function validateIsTimetable(
     );
   });
 
-  // Check if student section is detected (e.g. Section C, Section B, Sec-C, BCA-3-C)
+  // Check if student section is detected (e.g. Section C, Section B, Sec-C, BCA-3-C, BCA-3B)
   const hasSectionMatch = Boolean(
     (studentSection && lower.includes(studentSection.toLowerCase().replace(/[^a-z0-9]/g, ""))) ||
     lower.includes("section a") ||
@@ -464,7 +464,8 @@ export function validateIsTimetable(
     lower.includes("sec c") ||
     lower.includes("sec-a") ||
     lower.includes("sec-b") ||
-    lower.includes("sec-c")
+    lower.includes("sec-c") ||
+    /\b(?:bca|btech|cse|it|ece|ee|me|ce)[- ]?[0-9]?[- ]?[a-d]\b/i.test(lower)
   );
 
   const isValid =
@@ -579,16 +580,16 @@ export function parseTimetableDocument(
       ? fileNameParam || "timetable"
       : input?.fileName || fileNameParam || "timetable";
 
-  // Validate that document is actually a timetable
-  const validation = validateIsTimetable(rawText, agcSubjects, studentSection);
-  if (!validation.valid) {
-    throw new Error(validation.error || "Uploaded document is not a timetable.");
-  }
-
   // Check if document matches Amritsar BCA schedule first
   const agcBcaParsed = parseAmritsarBcaTimetable(rawText, fileName, agcSubjects, studentSection);
   if (agcBcaParsed && agcBcaParsed.entries.length > 0) {
     return agcBcaParsed;
+  }
+
+  // Validate that document is actually a timetable
+  const validation = validateIsTimetable(rawText, agcSubjects, studentSection);
+  if (!validation.valid) {
+    throw new Error(validation.error || "Uploaded document is not a timetable.");
   }
 
   const lines = rawText
