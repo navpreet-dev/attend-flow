@@ -545,6 +545,10 @@ interface SubjectRow {
   type: string;
   href: string;
   saId: string | null;
+  /** Attended count parsed from the dashboard summary table cell — null when not parseable. */
+  dashboardAttended: number | null;
+  /** Total classes count parsed from the dashboard summary table cell — null when not parseable. */
+  dashboardTotal: number | null;
 }
 
 function parseSubjectRows(dashboardHtml: string): SubjectRow[] {
@@ -576,12 +580,48 @@ function parseSubjectRows(dashboardHtml: string): SubjectRow[] {
     // Some rows may include extra cells (faculty etc.); second cell is the type when present.
     const type = cells[1] && cells[1].length <= 24 ? cells[1] : "Theory";
 
+    // Try to extract attended/total from the dashboard summary table.
+    // The portal renders them as either "45/60" in one cell, or as two adjacent
+    // integer cells (attended, total). We check cells[2] onwards with sanity
+    // guards; if nothing matches we return null and fall back to a full fetch.
+    let dashboardAttended: number | null = null;
+    let dashboardTotal: number | null = null;
+
+    // Pattern A: "45/60" or "45 / 60" in a single cell
+    for (let ci = 2; ci < cells.length; ci++) {
+      const sm = cells[ci].match(/^(\d+)\s*\/\s*(\d+)$/);
+      if (sm) {
+        const a = Number(sm[1]), t = Number(sm[2]);
+        // Sanity: attended <= total, total in plausible range for a semester
+        if (a >= 0 && t >= a && t > 0 && t <= 2000) {
+          dashboardAttended = a;
+          dashboardTotal = t;
+          break;
+        }
+      }
+    }
+
+    // Pattern B: two adjacent purely-numeric cells (e.g. "45", "60")
+    if (dashboardAttended === null) {
+      for (let ci = 2; ci < cells.length - 1; ci++) {
+        if (!/^\d+$/.test(cells[ci]) || !/^\d+$/.test(cells[ci + 1])) continue;
+        const a = Number(cells[ci]), t = Number(cells[ci + 1]);
+        if (a >= 0 && t >= a && t > 0 && t <= 2000) {
+          dashboardAttended = a;
+          dashboardTotal = t;
+          break;
+        }
+      }
+    }
+
     if (name && name.toLowerCase() !== "subject") {
       rows.push({
         name,
         type,
         href: href.startsWith("http") ? href : `${PORTAL_ORIGIN}${href.startsWith("/") ? "" : "/"}${href}`,
         saId: saMatch ? saMatch[1] : null,
+        dashboardAttended,
+        dashboardTotal,
       });
     }
   }
@@ -654,6 +694,14 @@ export interface FetchSnapshotOptions {
   purpose?: PortalPurpose;
   /** Absolute epoch-ms budget; defaults per purpose. */
   deadlineMs?: number;
+  /**
+   * Previously stored per-subject attendance keyed by subjectCode.
+   * When a subject’s dashboard-reported attended+total exactly matches what’s stored,
+   * its per-subject report fetch is skipped entirely — the attendance hasn’t changed.
+   * This is the biggest sync speed-up for repeat syncs: up to N-1 fewer portal requests.
+   * Falls back to a full fetch for any subject whose totals differ or are not in the map.
+   */
+  storedSubjects?: Map<string, { attended: number; total: number }>;
 }
 
 function jarFromCookies(cookies: PortalCookie[] | undefined): CookieJar {
@@ -683,7 +731,7 @@ export async function fetchPortalSnapshot(
         { jar, purpose, deadlineMs, timeoutMs: PROBE_TIMEOUT_MS, resilient: false }
       );
       if (probe.res.ok && looksAuthenticated(probe.html)) {
-        return await harvestFromDashboard(probe.html, jar, { reused: true, purpose, deadlineMs });
+        return await harvestFromDashboard(probe.html, jar, { reused: true, purpose, deadlineMs, storedSubjects: opts.storedSubjects });
       }
     } catch {
       // Probe failures fall through to a fresh login, which reports real errors.
@@ -786,7 +834,7 @@ export async function fetchPortalSnapshot(
     );
   }
 
-  return await harvestFromDashboard(dashboardHtml, jar, { reused: false, purpose, deadlineMs });
+  return await harvestFromDashboard(dashboardHtml, jar, { reused: false, purpose, deadlineMs, storedSubjects: opts.storedSubjects });
 }
 
 /* --------------------- shared dashboard harvest ---------------------------- */
@@ -794,7 +842,17 @@ export async function fetchPortalSnapshot(
 async function harvestFromDashboard(
   dashboardHtml: string,
   jar: CookieJar,
-  ctx: { reused: boolean; purpose: PortalPurpose; deadlineMs: number }
+  ctx: {
+    reused: boolean;
+    purpose: PortalPurpose;
+    deadlineMs: number;
+    /**
+     * Stored attendance per subjectCode — enables smart-skip: when the
+     * dashboard reports the same attended/total we already have, the
+     * per-subject report fetch is skipped to save portal requests.
+     */
+    storedSubjects?: Map<string, { attended: number; total: number }>;
+  }
 ): Promise<PortalSnapshot> {
   // Parse profile + subject table.
   const profile = parseProfile(dashboardHtml);
@@ -814,6 +872,41 @@ async function harvestFromDashboard(
   // Requests are globally paced by the gate — sequential here keeps order deterministic.
   for (const row of subjectRows) {
     const code = row.saId ? `AGC-${row.saId}` : `AGC-${row.name.replace(/\s+/g, "-").toUpperCase().slice(0, 24)}`;
+
+    // ── Smart-skip optimisation ───────────────────────────────────────────────
+    // If the dashboard summary table already shows the same attended+total we
+    // have stored, no new classes have been recorded since last sync — there’s
+    // nothing to update, so we skip the per-subject report fetch entirely.
+    // This is completely safe: we only skip when BOTH numbers match exactly.
+    // Any mismatch (or missing stored data) falls through to the full fetch.
+    if (
+      ctx.storedSubjects &&
+      row.dashboardAttended !== null &&
+      row.dashboardTotal !== null
+    ) {
+      const stored = ctx.storedSubjects.get(code);
+      if (
+        stored &&
+        stored.attended === row.dashboardAttended &&
+        stored.total === row.dashboardTotal
+      ) {
+        // Totals match → attendance unchanged → skip report fetch.
+        const pct = stored.total > 0 ? Math.round((stored.attended / stored.total) * 1000) / 10 : 0;
+        subjects.push({
+          subjectCode: code,
+          subjectName: row.name,
+          subjectType: row.type,
+          saId: row.saId,
+          attended: stored.attended,
+          total: stored.total,
+          percentage: pct,
+          reportOk: false, // false → sync-service keeps existing DB values as-is
+        });
+        continue;
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     let attended = 0;
     let total = 0;
     let reportOk = false;

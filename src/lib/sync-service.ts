@@ -27,20 +27,22 @@ const inFlightByStudent = new Map<string, Promise<DashboardPayload>>();
 const MIN_SYNC_INTERVAL_MS = 45_000;
 
 export async function getDashboardData(studentDbId: string): Promise<DashboardPayload> {
-  const student = await db.student.findUnique({
-    where: { id: studentDbId },
-    include: {
-      subjects: { orderBy: { subjectName: "asc" } },
-      syncEvents: { orderBy: { createdAt: "desc" }, take: 5 },
-    },
-  });
+  // Run both queries in parallel — they don't depend on each other.
+  const [student, logs] = await Promise.all([
+    db.student.findUnique({
+      where: { id: studentDbId },
+      include: {
+        subjects: { orderBy: { subjectName: "asc" } },
+        syncEvents: { orderBy: { createdAt: "desc" }, take: 5 },
+      },
+    }),
+    db.attendanceLog.findMany({
+      where: { studentId: studentDbId },
+      orderBy: { date: "desc" },
+      take: 4000,
+    }),
+  ]);
   if (!student) throw new Error("Student not found");
-
-  const logs = await db.attendanceLog.findMany({
-    where: { studentId: studentDbId },
-    orderBy: { date: "desc" },
-    take: 4000,
-  });
 
   const subjectNames = new Map(student.subjects.map((s) => [s.subjectCode, s.subjectName]));
 
@@ -151,10 +153,15 @@ export async function persistSnapshot(
       )
   );
 
-  const existingLogs = await db.attendanceLog.findMany({
-    where: { studentId: studentDbId },
-    select: { subjectCode: true, date: true, status: true },
-  });
+  // Scope to only dates in this snapshot — avoids scanning all historical logs.
+  const snapshotDates = [...new Set(snapshot.logs.map((l) => l.date))];
+  const existingLogs =
+    snapshotDates.length === 0
+      ? []
+      : await db.attendanceLog.findMany({
+          where: { studentId: studentDbId, date: { in: snapshotDates } },
+          select: { subjectCode: true, date: true, status: true },
+        });
   // Keys include the |N occurrence suffix when present, so extra-lecture rows
   // are stored and looked up distinctly from normal single-lecture rows.
   const existingMap = new Map(existingLogs.map((l) => [`${l.subjectCode}|${l.date}`, l.status]));
@@ -260,7 +267,12 @@ export async function syncStudent(
     purpose?: PortalPurpose;
   }
 ): Promise<DashboardPayload> {
-  const student = await db.student.findUnique({ where: { id: studentDbId } });
+  const student = await db.student.findUnique({
+    where: { id: studentDbId },
+    // Include subjects so we can build the smart-skip map for fetchPortalSnapshot.
+    // This saves up to N portal requests when attendance hasn't changed.
+    include: { subjects: true },
+  });
   if (!student) throw new PortalError("UNKNOWN", "Session not found. Please log in again.");
 
   const rollNo = opts.credentials?.rollNo ?? student.rollNo;
@@ -306,9 +318,21 @@ export async function syncStudent(
       // Freshly typed credentials mean an explicit login — always do a real login.
       // Otherwise try the stored portal session first (fewer requests, no login page).
       const storedCookies = opts.credentials ? null : loadPortalCookies(student);
+
+      // Build a subjectCode → {attended, total} map from stored subjects.
+      // Passed to fetchPortalSnapshot so unchanged subjects can be skipped
+      // without fetching their individual attendance report pages.
+      const storedSubjectsMap = new Map(
+        (student.subjects ?? []).map((s) => [
+          s.subjectCode,
+          { attended: s.attended, total: s.total },
+        ])
+      );
+
       const snapshot = await fetchPortalSnapshot(rollNo, password, {
         existingCookies: storedCookies ?? undefined,
         purpose,
+        storedSubjects: storedSubjectsMap.size > 0 ? storedSubjectsMap : undefined,
       });
       ok = true;
       const failedReports = snapshot.subjects.filter((s) => !s.reportOk).length;
@@ -366,12 +390,16 @@ export async function syncStudent(
           )
       );
 
-      // Log rows: keys include the |N suffix for extra-lecture dedup.
-      // Status corrections and new inserts are batched for speed.
-      const existingLogs = await db.attendanceLog.findMany({
-        where: { studentId: studentDbId },
-        select: { subjectCode: true, date: true, status: true },
-      });
+      // Scope the existing-logs query to only dates present in this snapshot.
+      // Avoids loading thousands of historical log rows when only recent dates changed.
+      const snapshotDates = [...new Set(snapshot.logs.map((l) => l.date))];
+      const existingLogs =
+        snapshotDates.length === 0
+          ? []
+          : await db.attendanceLog.findMany({
+              where: { studentId: studentDbId, date: { in: snapshotDates } },
+              select: { subjectCode: true, date: true, status: true },
+            });
       const existingMap = new Map(existingLogs.map((l) => [`${l.subjectCode}|${l.date}`, l.status]));
       const newLogs: typeof snapshot.logs = [];
       const updatePromises: Promise<unknown>[] = [];
